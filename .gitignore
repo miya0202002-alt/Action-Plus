@@ -1,0 +1,36 @@
+# OS関連
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# エディタ関連
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# 一時ファイル
+*.tmp
+*.log
+*.cache
+
+# 環境変数
+.env
+.env.local
+
+# ビルド成果物（必要に応じて）
+dist/
+build/
+*.min.js
+*.min.css
+
+
