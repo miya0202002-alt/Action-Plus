@@ -2,6 +2,9 @@
 
 このプロンプトは、Next.js App Router プロジェクトに Supabase データベースと Clerk 認証を完全に統合するための包括的なガイドです。
 
+**最終更新日**: 2025年12月  
+**対応バージョン**: Next.js 15.x, React 19.x, Clerk 5.x, Supabase 2.x
+
 ---
 
 ## 📋 実行前の確認事項
@@ -9,13 +12,21 @@
 AIアシスタントへ：このプロンプトを実行する前に、以下を確認してください：
 
 1. ✅ Next.js プロジェクトが App Router を使用している
-2. ✅ `/docs/` フォルダ内に設計ドキュメントが存在する
-3. ✅ 以下のベストプラクティスファイルを読み込み済み：
+2. ✅ Next.js と React が脆弱性対策済みの最新パッチバージョンである（React2Shell対策）
+3. ✅ `/docs/` フォルダ内に設計ドキュメントが存在する
+4. ✅ 以下のベストプラクティスファイルを読み込み済み：
    - `clerk_setupprpompt.md`
    - `supabase_bootstrap_nextjs_app_with_SupabaseAuth.md`
    - `supabase_migration_prompt.md`
    - `supabase_postgres_SQL_Style_guide.md`
    - `supabase_realtime_AIprompt.md`
+
+### 🔒 セキュリティ要件（必須）
+
+**React2Shell脆弱性対策**:
+- React 19.0.1、19.1.2、または19.2.1以降を使用
+- Next.js 15.0.5、15.1.9、15.2.6、15.3.6、15.4.8、15.5.7、または16.0.7以降を使用
+- プロジェクト作成後、必ず `npx fix-react2shell-next --yes` を実行して確認
 
 ---
 
@@ -87,11 +98,17 @@ npm install @clerk/nextjs@latest
 # Supabase のインストール
 npm install @supabase/supabase-js@latest @supabase/ssr@latest
 
-# 型定義（必要に応じて）
+# 型定義とバリデーション（推奨）
 npm install -D @types/node
+npm install zod  # Server Actions のバリデーション用
+
+# 日付操作（オプション、FRONTEND_IMPLEMENTATION_ADDON.mdで使用）
+npm install date-fns
 ```
 
 **実行コマンドを生成し、ターミナルで実行**
+
+**重要**: インストール後、必ず `npx fix-react2shell-next --yes` を実行して、React2Shell脆弱性対策を確認してください。
 
 ---
 
@@ -543,11 +560,28 @@ export function useRealtimeChannel(
 
 ### フェーズ 8️⃣: 型定義の生成（TypeScript）
 
+#### 8-1. Supabase CLI を使用した型定義の自動生成（推奨）
+
+**前提条件**: Supabase CLI がインストールされていること
+
+```bash
+# Supabase CLI のインストール（未インストールの場合）
+npm install -g supabase
+
+# プロジェクトとリンク（初回のみ）
+supabase link --project-ref your-project-ref
+
+# 型定義の生成
+supabase gen types typescript --linked > lib/supabase/types.ts
+```
+
+#### 8-2. 手動で型定義を作成する場合
+
 `lib/supabase/types.ts` を作成：
 
 ```typescript
 // Supabase の型定義
-// 実際の型は supabase gen types typescript を使用して生成することを推奨
+// 注意: 可能な限り Supabase CLI を使用した自動生成を推奨
 
 export type Json =
   | string
@@ -588,8 +622,34 @@ export interface Database {
       }
       // [設計ドキュメントに基づいて、すべてのテーブルの型を生成]
     }
+    Views: {
+      // ビューがある場合
+    }
+    Functions: {
+      // 関数がある場合
+    }
   }
 }
+```
+
+#### 8-3. 型定義の使用方法
+
+クライアントとサーバーで型安全なクエリを実行：
+
+```typescript
+import { createClient } from '@/lib/supabase/client'
+import type { Database } from '@/lib/supabase/types'
+
+type User = Database['public']['Tables']['users']['Row']
+type UserInsert = Database['public']['Tables']['users']['Insert']
+type UserUpdate = Database['public']['Tables']['users']['Update']
+
+// 使用例
+const supabase = createClient()
+const { data } = await supabase
+  .from('users')
+  .select('*')
+  .returns<User[]>()
 ```
 
 ---
