@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^6.36.7",
+    "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.90.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.562.0",
