@@ -34,7 +34,7 @@ git commit -m "Initial commit: プロジェクト仕様書と基本ファイル�
 
 1. GitHubにログイン
 2. 右上の「+」ボタンから「New repository」を選択
-3. リポジトリ名を入力（例：`traveling`）
+3. リポジトリ名を入力（例：`ActionPlus`）
 4. 説明を追加（オプション）
 5. PublicまたはPrivateを選択
 6. **「Initialize this repository with a README」はチェックしない**（既にREADME.mdがあるため）
@@ -46,7 +46,7 @@ GitHubでリポジトリ作成後、表示されるコマンドを実行：
 
 ```bash
 # リモートリポジトリを追加（YOUR_USERNAMEを実際のユーザー名に置き換え）
-git remote add origin https://github.com/YOUR_USERNAME/traveling.git
+git remote add origin https://github.com/YOUR_USERNAME/ActionPlus.git
 
 # メインブランチをmainに設定（GitHubのデフォルト）
 git branch -M main

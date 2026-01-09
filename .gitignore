@@ -33,4 +33,19 @@ build/
 *.min.js
 *.min.css
 
+# Next.js
+.next/
+out/
+.vercel
+
+# 依存関係
+node_modules/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# テスト
+coverage/
+
 
