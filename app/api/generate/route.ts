@@ -12,7 +12,7 @@ export async function POST(req: Request) {
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
+      model: "gemini-1.5-flash-001",
       // JSONモードを強制しない（テキストで受け取って自分で掃除する方が安定するため）
     });
 
