@@ -1,76 +1,87 @@
-"use client";
-import { useState } from "react";
-import { Sparkles, ArrowRight, CheckCircle2 } from "lucide-react";
-import { motion } from "framer-motion";
+import { auth } from "@clerk/nextjs/server";
+import { SignInButton, SignedIn, SignedOut } from "@clerk/nextjs";
+import Link from "next/link";
+import { ArrowRight, Target, CheckCircle, Users } from "lucide-react";
 
-export default function Home() {
-  const [formData, setFormData] = useState({ worry: "", dream: "", personality: "" });
-  const [result, setResult] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-      const data = await res.json();
-      setResult(data);
-    } catch (error) {
-      alert("エラーが発生しました");
-    } finally {
-      setLoading(false);
-    }
-  };
+export default async function Home() {
+  const { userId } = await auth();
 
   return (
-    <div className="min-h-screen bg-blue-50 p-6 flex items-center justify-center">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
-        <div className="bg-indigo-600 p-6 text-white text-center">
-          <h1 className="text-2xl font-bold flex items-center justify-center gap-2">
-            <Sparkles className="w-6 h-6" /> ActionPlus
+    // 画面全体をスマホ枠のように扱う
+    <div className="min-h-screen bg-[#F8F5E9] flex flex-col items-center pb-24">
+      
+      {/* ヒーローセクション（トップの目立つ部分） */}
+      <div className="w-full max-w-md px-6 pt-12 pb-8 flex flex-col items-center text-center space-y-6">
+        <div className="space-y-2">
+          <h1 className="text-4xl font-extrabold tracking-tight text-[#2E5D4B]">
+            ActionPlus
           </h1>
+          <p className="text-sm font-medium text-[#2E5D4B]/70">
+            迷う時間を、動く時間へ。
+          </p>
         </div>
-        <div className="p-8">
-          {!result ? (
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">今の悩み</label>
-                <input type="text" className="w-full p-3 border rounded-lg" 
-                  value={formData.worry} onChange={(e) => setFormData({...formData, worry: e.target.value})} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">将来の夢</label>
-                <input type="text" className="w-full p-3 border rounded-lg" 
-                  value={formData.dream} onChange={(e) => setFormData({...formData, dream: e.target.value})} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">性格</label>
-                <input type="text" className="w-full p-3 border rounded-lg" 
-                  value={formData.personality} onChange={(e) => setFormData({...formData, personality: e.target.value})} />
-              </div>
-              <button type="submit" disabled={loading} className="w-full bg-indigo-600 text-white py-3 rounded-lg">
-                {loading ? "AIが考え中..." : "診断する"}
+
+        {/* ログイン・開始ボタンエリア */}
+        <div className="w-full pt-4">
+          <SignedOut>
+            {/* 未ログイン時：Googleログインボタンが出る */}
+            <SignInButton mode="modal">
+              <button className="w-full bg-[#2E5D4B] text-white font-bold py-4 rounded-xl shadow-lg shadow-[#2E5D4B]/20 active:scale-95 transition-transform flex items-center justify-center gap-3">
+                <span>今すぐはじめる</span>
+                <ArrowRight size={20} />
               </button>
-            </form>
-          ) : (
-            <div className="space-y-6">
-              <p className="bg-indigo-50 p-4 rounded-lg">{result.message}</p>
-              <div className="space-y-3">
-                {result.tasks && result.tasks.map((task: string, i: number) => (
-                  <div key={i} className="flex items-center gap-3 p-3 border rounded-lg bg-gray-50">
-                    <CheckCircle2 className="w-5 h-5 text-indigo-500" />{task}
-                  </div>
-                ))}
-              </div>
-              <button onClick={() => setResult(null)} className="w-full text-indigo-600 mt-4">もう一度</button>
-            </div>
-          )}
+            </SignInButton>
+            <p className="mt-4 text-xs text-gray-500">
+              大学生のための目標達成プラットフォーム
+            </p>
+          </SignedOut>
+
+          <SignedIn>
+            {/* ログイン済み：続きからボタン */}
+            <Link 
+              href="/plan" 
+              className="w-full bg-[#F2994A] text-white font-bold py-4 rounded-xl shadow-lg shadow-[#F2994A]/20 active:scale-95 transition-transform flex items-center justify-center gap-3 block"
+            >
+              <span>今日の活動を始める</span>
+              <ArrowRight size={20} />
+            </Link>
+          </SignedIn>
         </div>
       </div>
+
+      {/* 機能紹介カード（スマホで見やすい縦並び） */}
+      <div className="w-full max-w-md px-4 space-y-4">
+        <div className="bg-white p-5 rounded-2xl shadow-sm border border-[#2E5D4B]/10 flex items-center gap-4">
+          <div className="bg-[#E8F5E9] p-3 rounded-full text-[#2E5D4B]">
+            <Target size={24} />
+          </div>
+          <div>
+            <h3 className="font-bold text-[#2E5D4B]">AI計画作成</h3>
+            <p className="text-xs text-gray-500">目標に合わせてロードマップを自動生成</p>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl shadow-sm border border-[#2E5D4B]/10 flex items-center gap-4">
+          <div className="bg-[#FFF3E0] p-3 rounded-full text-[#F2994A]">
+            <CheckCircle size={24} />
+          </div>
+          <div>
+            <h3 className="font-bold text-[#2E5D4B]">習慣化サポート</h3>
+            <p className="text-xs text-gray-500">毎日のタスク管理で継続できる</p>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl shadow-sm border border-[#2E5D4B]/10 flex items-center gap-4">
+          <div className="bg-[#E1F5FE] p-3 rounded-full text-[#56CCF2]">
+            <Users size={24} />
+          </div>
+          <div>
+            <h3 className="font-bold text-[#2E5D4B]">コミュニティ</h3>
+            <p className="text-xs text-gray-500">同じ目標を持つ仲間と励まし合う</p>
+          </div>
+        </div>
+      </div>
+
     </div>
   );
 }
