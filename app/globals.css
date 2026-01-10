@@ -1,26 +1,18 @@
-@import "tailwindcss";
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: #F8F5E9; /* アイボリー */
+  --foreground: #2E5D4B; /* ディープグリーン */
+  --primary: #2E5D4B;
+  --accent-orange: #F2994A;
+  --accent-blue: #56CCF2;
 }
 
 body {
-  background: var(--background);
   color: var(--foreground);
+  background: var(--background);
   font-family: Arial, Helvetica, sans-serif;
+  padding-bottom: 80px; /* メニューの分だけ下を空ける */
 }
