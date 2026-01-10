@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import { Loader2, Sparkles, Network } from "lucide-react";
@@ -35,11 +35,23 @@ export default function PlanPage() {
 
       // API自体がエラーを返した場合（500エラーなど）
       if (!res.ok) {
-        throw new Error(`Server Error: ${res.status}`);
+        const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
+        const errorMessage = errorData.error || `Server Error: ${res.status}`;
+        const errorDetails = errorData.details || errorData.message || "";
+        throw new Error(
+          errorDetails 
+            ? `${errorMessage}\n詳細: ${typeof errorDetails === 'string' ? errorDetails : JSON.stringify(errorDetails)}`
+            : errorMessage
+        );
       }
 
       const data = await res.json();
       console.log("AI Response:", data); // ブラウザのコンソールで確認用
+
+      // エラーレスポンスのチェック
+      if (data.error) {
+        throw new Error(data.error + (data.details ? `\n詳細: ${JSON.stringify(data.details)}` : ""));
+      }
 
       // データの中身チェック（ここが重要）
       if (!data || !data.children || !Array.isArray(data.children)) {
@@ -104,8 +116,11 @@ export default function PlanPage() {
 
         {/* エラー表示エリア */}
         {errorMsg && (
-          <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm border border-red-100">
+          <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm border border-red-100 whitespace-pre-wrap">
             <strong>エラー:</strong> {errorMsg}
+            <p className="mt-2 text-xs text-red-500">
+              もう一度お試しいただくか、目標を具体的に入力してください。
+            </p>
           </div>
         )}
 
