@@ -1,81 +1,36 @@
-# ActionPlus
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-AIが目標からタスクを自動生成・管理するWebアプリ
+## Getting Started
 
-## 📋 プロジェクト概要
-
-ActionPlusは、ユーザーが設定した目標からAIが自動的にタスクを生成し、効率的に管理・実行をサポートするタスク管理アプリケーションです。
-
-### 主な機能
-
-- **AIタスク自動生成**: 目標を入力すると、AIが自動的にタスクを分解・生成
-- **タスク管理**: 生成されたタスクの進捗管理、優先順位付け、期限設定
-- **目標追跡**: 目標達成に向けた進捗の可視化
-- **スマートリマインダー**: 重要なタスクの通知機能
-
-## 🎯 ターゲットユーザー
-
-- 目標達成を効率的に進めたい人
-- タスク管理を自動化したい人
-- AIを活用した生産性向上を求める人
-
-## 📁 プロジェクト構成
-
-```
-ActionPlus/
-├── app/                    # Next.js App Router
-│   ├── layout.tsx         # ルートレイアウト
-│   ├── page.tsx           # ホームページ
-│   └── globals.css        # グローバルスタイル
-├── docs/                   # ドキュメント
-├── package.json           # 依存関係
-├── tsconfig.json          # TypeScript設定
-├── next.config.js         # Next.js設定
-└── README.md              # このファイル
-```
-
-## 🚀 セットアップ
-
-### 1. 依存関係のインストール
-
-```bash
-npm install
-```
-
-### 2. 開発サーバーの起動
+First, run the development server:
 
 ```bash
 npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
 ```
 
-ブラウザで [http://localhost:3000](http://localhost:3000) を開いてください。
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-### 3. ビルド
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-```bash
-npm run build
-npm start
-```
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-## 📖 詳細仕様
+## Learn More
 
-プロジェクトの詳細な仕様は `docs/` フォルダ内のドキュメントを参照してください。
+To learn more about Next.js, take a look at the following resources:
 
-## 🛠️ 技術スタック
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
 
-- **フレームワーク**: Next.js 15 (App Router)
-- **言語**: TypeScript 5.4+
-- **UI**: React 19
-- **スタイリング**: CSS Modules / インラインスタイル
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## 📝 ライセンス
+## Deploy on Vercel
 
-このプロジェクトのライセンス情報は後日追加予定です。
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
-## 🤝 コントリビューション
-
-コントリビューションを歓迎します！プルリクエストを送る前に、まずイシューを開いて変更内容を議論してください。
-
-## 📧 お問い合わせ
-
-プロジェクトに関する質問や提案がある場合は、イシューを作成してください。
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
