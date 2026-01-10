@@ -6,6 +6,9 @@ export async function POST(req: Request) {
     const { goal } = await req.json();
     const apiKey = process.env.GEMINI_API_KEY;
 
+    // ▼▼▼ この行を追加してください ▼▼▼
+    console.log("★APIキーの確認:", apiKey ? "読み込み成功" : "読み込み失敗(空っぽ)");
+
     if (!apiKey) {
       return NextResponse.json({ error: "API Key not found" }, { status: 500 });
     }
