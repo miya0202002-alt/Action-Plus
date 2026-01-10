@@ -1,28 +1,30 @@
 ﻿"use client";
 
 import { useState } from "react";
-import { ArrowRight, Loader2, Sparkles, Network } from "lucide-react";
+import { Loader2, Sparkles, Network } from "lucide-react";
 
-// ツリーのデータ型定義
+// 型定義（少し緩くしてエラーを防ぐ）
 type TreeItem = {
   name: string;
   children?: TreeItem[];
 };
 
 type TreeResponse = {
-  goal: string;
-  children: TreeItem[];
+  goal?: string;
+  children?: TreeItem[];
 };
 
 export default function PlanPage() {
   const [inputGoal, setInputGoal] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [treeData, setTreeData] = useState<TreeResponse | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleGenerate = async () => {
     if (!inputGoal) return;
     setIsLoading(true);
     setTreeData(null);
+    setErrorMsg(null);
 
     try {
       const res = await fetch("/api/generate", {
@@ -30,11 +32,24 @@ export default function PlanPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ goal: inputGoal }),
       });
+
+      // API自体がエラーを返した場合（500エラーなど）
+      if (!res.ok) {
+        throw new Error(`Server Error: ${res.status}`);
+      }
+
       const data = await res.json();
+      console.log("AI Response:", data); // ブラウザのコンソールで確認用
+
+      // データの中身チェック（ここが重要）
+      if (!data || !data.children || !Array.isArray(data.children)) {
+        throw new Error("AIが正しいデータを返しませんでした。もう一度試してください。");
+      }
+
       setTreeData(data);
-    } catch (error) {
-      console.error("Error:", error);
-      alert("生成に失敗しました。もう一度試してください。");
+    } catch (error: any) {
+      console.error("Error details:", error);
+      setErrorMsg(error.message || "予期せぬエラーが発生しました");
     } finally {
       setIsLoading(false);
     }
@@ -57,18 +72,16 @@ export default function PlanPage() {
 
         {/* 入力フォーム */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-[#2E5D4B]/10 space-y-4">
-          <div>
-            <label className="block text-sm font-bold text-[#2E5D4B] mb-2">
-              達成したい目標は？
-            </label>
-            <input
-              type="text"
-              value={inputGoal}
-              onChange={(e) => setInputGoal(e.target.value)}
-              placeholder="例：TOEIC 800点、フルマラソン完走"
-              className="w-full p-4 rounded-xl bg-[#F8F5E9] border-none text-[#2E5D4B] placeholder-[#2E5D4B]/40 focus:ring-2 focus:ring-[#2E5D4B]"
-            />
-          </div>
+          <label className="block text-sm font-bold text-[#2E5D4B] mb-2">
+            達成したい目標は？
+          </label>
+          <input
+            type="text"
+            value={inputGoal}
+            onChange={(e) => setInputGoal(e.target.value)}
+            placeholder="例：TOEIC 800点、フルマラソン完走"
+            className="w-full p-4 rounded-xl bg-[#F8F5E9] border-none text-[#2E5D4B] placeholder-[#2E5D4B]/40 focus:ring-2 focus:ring-[#2E5D4B]"
+          />
 
           <button
             onClick={handleGenerate}
@@ -78,7 +91,7 @@ export default function PlanPage() {
             {isLoading ? (
               <>
                 <Loader2 className="animate-spin" />
-                AIが分析中...
+                思考中...
               </>
             ) : (
               <>
@@ -89,12 +102,19 @@ export default function PlanPage() {
           </button>
         </div>
 
-        {/* 結果表示エリア（ツリー） */}
-        {treeData && (
+        {/* エラー表示エリア */}
+        {errorMsg && (
+          <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm border border-red-100">
+            <strong>エラー:</strong> {errorMsg}
+          </div>
+        )}
+
+        {/* 結果表示エリア（安全に表示） */}
+        {treeData && treeData.children && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="flex items-center gap-2 text-[#2E5D4B] font-bold border-b border-[#2E5D4B]/10 pb-2">
               <Network size={18} />
-              <span>{treeData.goal} の分解図</span>
+              <span>{treeData.goal || inputGoal} の分解図</span>
             </div>
             
             <div className="pl-2">
@@ -109,34 +129,32 @@ export default function PlanPage() {
   );
 }
 
-// 再帰的にツリーを表示するコンポーネント
+// 再帰コンポーネント（ここも安全対策済み）
 function TreeBranch({ item, level }: { item: TreeItem; level: number }) {
-  // レベルに応じた色とスタイル
+  if (!item) return null; // データがないなら何も表示しない
+
   const isRoot = level === 0;
-  const isLeaf = !item.children || item.children.length === 0;
+  const hasChildren = item.children && item.children.length > 0;
   
   return (
     <div className="relative">
-      {/* 枝の線 */}
       <div className="absolute left-[-12px] top-0 bottom-0 w-px bg-[#2E5D4B]/20" />
       <div className="absolute left-[-12px] top-6 w-3 h-px bg-[#2E5D4B]/20" />
 
-      {/* カード本体 */}
       <div className={`
         relative mb-3 ml-2 p-4 rounded-xl border
         ${isRoot ? "bg-white border-[#2E5D4B] shadow-md" : ""}
-        ${!isRoot && !isLeaf ? "bg-white border-[#2E5D4B]/20" : ""}
-        ${isLeaf ? "bg-[#F8F5E9] border-[#2E5D4B]/10" : ""}
+        ${!isRoot && hasChildren ? "bg-white border-[#2E5D4B]/20" : ""}
+        ${!hasChildren ? "bg-[#F8F5E9] border-[#2E5D4B]/10" : ""}
       `}>
         <h3 className={`font-bold ${isRoot ? "text-lg text-[#2E5D4B]" : "text-sm text-[#2E5D4B]"}`}>
           {item.name}
         </h3>
       </div>
 
-      {/* 子要素がある場合は再帰表示 */}
-      {item.children && (
+      {hasChildren && (
         <div className="pl-6 border-l border-[#2E5D4B]/20 ml-6">
-          {item.children.map((child, idx) => (
+          {item.children!.map((child, idx) => (
             <TreeBranch key={idx} item={child} level={level + 1} />
           ))}
         </div>
