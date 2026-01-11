@@ -1,145 +1,70 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from 'next/server';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export async function POST(req: Request) {
   try {
-    const { goal } = await req.json();
-
-    if (!goal || typeof goal !== 'string' || goal.trim() === '') {
-      return NextResponse.json(
-        { error: "目標が入力されていません" },
-        { status: 400 }
-      );
-    }
-
+    const { goal, targetDate, currentLevel, studyHours } = await req.json();
     const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
-      console.error("★GEMINI_API_KEYが環境変数に設定されていません");
-      return NextResponse.json(
-        { error: "API Key not found" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "APIキー未設定" }, { status: 500 });
     }
 
-    // プロンプトを改善
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash-lite", // 以前成功したモデル
+      generationConfig: { responseMimeType: "application/json" }
+    });
+
     const prompt = `
-あなたはAction.plusの核心機能を担う「要素分解AI」です。
-ユーザーの目標を、習得すべき最小単位の知識やスキルまで、樹形図形式で分解してください。
+      あなたはAction.plusの「AIロードマップ作成機能」です。
+      ユーザーの目標に対して、それを達成するために必要な要素（学習項目・タスク）を網羅的に洗い出し、
+      実行可能なタスクシート（ロードマップ）を作成してください。
 
-# 出力形式（厳守）
-必ず以下のJSON形式の**文字列のみ**を出力してください。
-Markdownのコードブロック（\`\`\`jsonなど）は絶対に含めないでください。
+      【ユーザー入力情報】
+      1. 目標: ${goal}
+      2. 達成期限: ${targetDate || "指定なし（標準的な期間で設定）"}
+      3. 現在のスタート位置: ${currentLevel || "未入力（初心者と仮定）"}
+      4. 1日の確保可能時間: ${studyHours || "平日1時間、休日2時間程度"}
+      5. 今日: ${new Date().toLocaleDateString('ja-JP')} (これより前の日付は設定しないこと)
 
-{
-  "goal": "目標名",
-  "children": [
-    {
-      "name": "大項目",
-      "children": [
-        { "name": "小項目" }
-      ]
-    }
-  ]
-}
+      【命令】
+      目標達成に必要なプロセスを論理的に分解し、以下の要件に従ってタスクリストを作成してください。
+      
+      1. **網羅性**: 必要な知識・スキルを漏れなくリストアップする。
+      2. **要素ベース**: 「本を買う」などの単純行動ではなく、「〇〇の文法を理解する」「過去問で〇点を取る」など、習得・達成すべき要素を書く。
+      3. **期限設定（最重要）**:
+         - スタート日: 今日（${new Date().toLocaleDateString('ja-JP')}）
+         - ゴール日: ユーザーの達成期限（${targetDate}）
+         - **制約**: 全てのタスクの期限は、必ずこの期間内に収めてください。**ゴール日より後の日付は絶対に出力禁止**です。期間が短い場合は、タスク数を減らして調整してください。
+      4. **優先順位**: 必須項目はHigh、推奨はMedium、余裕があればLow。
 
-ユーザーの目標: ${goal}
-`;
-
-    // ライブラリ(GoogleGenerativeAI)を使わず、fetchで直接通信します
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorData;
-      try {
-        errorData = JSON.parse(errorText);
-      } catch {
-        errorData = { message: errorText };
-      }
-      console.error("★Google API エラー:", response.status, errorData);
-      return NextResponse.json(
+      出力は必ず以下のJSON形式のリストにしてください（ルートは配列）。
+      
+      [
         {
-          error: "AI API呼び出しに失敗しました",
-          details: errorData
+          "title": "タスク名（具体的かつ完結に）",
+          "description": "何をするのか、達成基準など（短く）",
+          "deadline": "YYYY-MM-DD",
+          "priority": "High" | "Medium" | "Low",
+          "estimatedHours": 数字（想定所要時間h）
         },
-        { status: response.status }
-      );
-    }
+        ...
+      ]
+    `;
 
-    const data = await response.json();
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
+    const json = JSON.parse(text);
 
-    // レスポンス構造の検証
-    if (!data.candidates || !data.candidates[0] || !data.candidates[0].content || !data.candidates[0].content.parts) {
-      console.error("★予期しないレスポンス構造:", data);
-      return NextResponse.json(
-        { error: "AIからの応答形式が不正です" },
-        { status: 500 }
-      );
-    }
+    // 配列であることを保証
+    const roadmap = Array.isArray(json) ? json : (json.roadmap || []);
 
-    const text = data.candidates[0].content.parts[0].text;
+    return NextResponse.json({ roadmap });
 
-    if (!text) {
-      console.error("★AIからのテキストが空です");
-      return NextResponse.json(
-        { error: "AIからの応答が空です" },
-        { status: 500 }
-      );
-    }
 
-    // JSONの整形（```jsonや```を削除）
-    let jsonStr = text.replace(/```json/g, "").replace(/```/g, "").trim();
-    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-
-    if (!jsonMatch) {
-      console.error("★JSONが見つかりません。テキスト:", text);
-      return NextResponse.json(
-        { error: "AIが正しいJSON形式で応答しませんでした", rawText: text },
-        { status: 500 }
-      );
-    }
-
-    jsonStr = jsonMatch[0];
-
-    let result;
-    try {
-      result = JSON.parse(jsonStr);
-    } catch (parseError) {
-      console.error("★JSONパースエラー:", parseError, "テキスト:", jsonStr);
-      return NextResponse.json(
-        { error: "JSONの解析に失敗しました", rawText: jsonStr },
-        { status: 500 }
-      );
-    }
-
-    // 結果の検証
-    if (!result.children || !Array.isArray(result.children)) {
-      console.error("★結果にchildrenがありません:", result);
-      return NextResponse.json(
-        { error: "AIが正しいデータ構造を返しませんでした", received: result },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json(result);
-
-  } catch (error: any) {
-    console.error("★サーバー内部エラー:", error);
-    return NextResponse.json(
-      {
-        error: "サーバー内部エラーが発生しました",
-        message: error?.message || "Unknown error"
-      },
-      { status: 500 }
-    );
+  } catch (error) {
+    console.error("Gemini Error:", error);
+    return NextResponse.json({ title: "分解に失敗しました", days: 0 }, { status: 500 });
   }
 }

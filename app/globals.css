@@ -1,28 +1,10 @@
-﻿@tailwind base;
-@tailwind components;
-@tailwind utilities;
+﻿@import "tailwindcss";
 
-:root {
-  --background: #F8F5E9; /* アイボリー */
-  --foreground: #2E5D4B; /* ディープグリーン */
-}
-
-/* スマホ特有のスクロール操作を心地よくする設定 */
-html {
-  -webkit-tap-highlight-color: transparent; /* タップ時の青い枠を消す */
-  scroll-behavior: smooth;
-}
-
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  
-  /* メニューバーの分だけ下を空ける & iPhoneのホームバー回避 */
-  padding-bottom: calc(80px + env(safe-area-inset-bottom));
-}
-
-/* 押した感じが出るアニメーション用 */
-.active-press:active {
-  transform: scale(0.98);
+/* v4ではこれだけでOKです。
+  以下は、iPhoneなどで下部メニューが隠れないようにするためのカスタム設定です。
+*/
+@layer utilities {
+  .safe-area-pb {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }

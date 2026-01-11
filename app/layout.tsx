@@ -1,8 +1,7 @@
 ﻿import type { Metadata } from "next";
-import { ClerkProvider } from "@clerk/nextjs";
 import { Inter } from "next/font/google";
-import "./globals.css";
-import BottomNav from "@/components/BottomNav";
+import "./globals.css"; // 👈 これが超重要！デザインの読み込み
+import { ClerkProvider } from '@clerk/nextjs';
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -19,12 +18,7 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="ja">
-        <body className={inter.className}>
-          <main className="min-h-screen">
-            {children}
-          </main>
-          <BottomNav />
-        </body>
+        <body className={inter.className}>{children}</body>
       </html>
     </ClerkProvider>
   );

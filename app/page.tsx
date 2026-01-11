@@ -1,87 +1,66 @@
-import { auth } from "@clerk/nextjs/server";
-import { SignInButton, SignedIn, SignedOut } from "@clerk/nextjs";
-import Link from "next/link";
-import { ArrowRight, Target, CheckCircle, Users } from "lucide-react";
+"use client";
 
-export default async function Home() {
-  const { userId } = await auth();
+import React, { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { Chrome, Loader2 } from 'lucide-react';
+import { SignInButton, useUser } from "@clerk/nextjs";
 
+export default function LoginPage() {
+  const { isSignedIn, isLoaded } = useUser();
+  const router = useRouter();
+
+  // 画面が表示されたら実行される処理
+  useEffect(() => {
+    // ロードが完了していて、かつログイン済みなら
+    if (isLoaded && isSignedIn) {
+      // タイムラインへ強制移動（履歴に残さないreplaceを使用）
+      router.replace('/timeline');
+    }
+  }, [isLoaded, isSignedIn, router]);
+
+  // 1. まだ確認中、または 2. ログイン済み（転送待ち）の場合
+  // 画面には何も表示しないか、ローディングだけ表示する
+  if (!isLoaded || isSignedIn) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <Loader2 className="w-10 h-10 text-sky-500 animate-spin" />
+      </div>
+    );
+  }
+
+  // 3. ログインしていない場合のみ、以下の画面を表示
   return (
-    // 画面全体をスマホ枠のように扱う
-    <div className="min-h-screen bg-[#F8F5E9] flex flex-col items-center pb-24">
-      
-      {/* ヒーローセクション（トップの目立つ部分） */}
-      <div className="w-full max-w-md px-6 pt-12 pb-8 flex flex-col items-center text-center space-y-6">
-        <div className="space-y-2">
-          <h1 className="text-4xl font-extrabold tracking-tight text-[#2E5D4B]">
-            ActionPlus
-          </h1>
-          <p className="text-sm font-medium text-[#2E5D4B]/70">
-            迷う時間を、動く時間へ。
-          </p>
-        </div>
+    <div className="min-h-screen bg-white flex flex-col items-center justify-center px-6 relative overflow-hidden">
+      {/* 背景の装飾 */}
+      <div className="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] bg-sky-100 rounded-full blur-[90px] opacity-50 pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] bg-sky-100 rounded-full blur-[90px] opacity-50 pointer-events-none" />
 
-        {/* ログイン・開始ボタンエリア */}
-        <div className="w-full pt-4">
-          <SignedOut>
-            {/* 未ログイン時：Googleログインボタンが出る */}
-            <SignInButton mode="modal">
-              <button className="w-full bg-[#2E5D4B] text-white font-bold py-4 rounded-xl shadow-lg shadow-[#2E5D4B]/20 active:scale-95 transition-transform flex items-center justify-center gap-3">
-                <span>今すぐはじめる</span>
-                <ArrowRight size={20} />
-              </button>
-            </SignInButton>
-            <p className="mt-4 text-xs text-gray-500">
-              大学生のための目標達成プラットフォーム
-            </p>
-          </SignedOut>
+      {/* メインコンテンツ */}
+      <div className="z-10 flex flex-col items-center w-full max-w-sm">
 
-          <SignedIn>
-            {/* ログイン済み：続きからボタン */}
-            <Link 
-              href="/plan" 
-              className="w-full bg-[#F2994A] text-white font-bold py-4 rounded-xl shadow-lg shadow-[#F2994A]/20 active:scale-95 transition-transform flex items-center justify-center gap-3 block"
+        {/* ロゴエリア */}
+        <h1 className="text-5xl font-extrabold text-sky-500 mb-4 tracking-tight drop-shadow-sm">
+          ActionPlus
+        </h1>
+
+        {/* キャッチコピー */}
+        <p className="text-gray-400 text-lg mb-20 font-medium tracking-wide">
+          迷う時間を、動く時間へ。
+        </p>
+
+        {/* ログインボタンエリア */}
+        <div className="w-full">
+          <SignInButton mode="modal" forceRedirectUrl="/timeline">
+            <button
+              className="w-full flex items-center justify-center gap-3 bg-white border border-gray-200 text-gray-700 font-medium py-4 px-4 rounded-xl shadow-sm hover:bg-gray-50 hover:shadow-md active:scale-95 transition-all duration-200"
             >
-              <span>今日の活動を始める</span>
-              <ArrowRight size={20} />
-            </Link>
-          </SignedIn>
+              <Chrome className="w-6 h-6 text-gray-900" />
+              <span className="text-base">Googleでログイン</span>
+            </button>
+          </SignInButton>
         </div>
+
       </div>
-
-      {/* 機能紹介カード（スマホで見やすい縦並び） */}
-      <div className="w-full max-w-md px-4 space-y-4">
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-[#2E5D4B]/10 flex items-center gap-4">
-          <div className="bg-[#E8F5E9] p-3 rounded-full text-[#2E5D4B]">
-            <Target size={24} />
-          </div>
-          <div>
-            <h3 className="font-bold text-[#2E5D4B]">AI計画作成</h3>
-            <p className="text-xs text-gray-500">目標に合わせてロードマップを自動生成</p>
-          </div>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-[#2E5D4B]/10 flex items-center gap-4">
-          <div className="bg-[#FFF3E0] p-3 rounded-full text-[#F2994A]">
-            <CheckCircle size={24} />
-          </div>
-          <div>
-            <h3 className="font-bold text-[#2E5D4B]">習慣化サポート</h3>
-            <p className="text-xs text-gray-500">毎日のタスク管理で継続できる</p>
-          </div>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-[#2E5D4B]/10 flex items-center gap-4">
-          <div className="bg-[#E1F5FE] p-3 rounded-full text-[#56CCF2]">
-            <Users size={24} />
-          </div>
-          <div>
-            <h3 className="font-bold text-[#2E5D4B]">コミュニティ</h3>
-            <p className="text-xs text-gray-500">同じ目標を持つ仲間と励まし合う</p>
-          </div>
-        </div>
-      </div>
-
     </div>
   );
 }
