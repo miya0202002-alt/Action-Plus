@@ -317,7 +317,7 @@ export default function HomePage() {
             setSelectedTask(null);
             setSelectedImage(null);
             setIsPostModalOpen(false);
-            fetchData(); // 再取得
+            fetchData(myProfile.id); // 再取得
         }
         setIsPosting(false);
     };
