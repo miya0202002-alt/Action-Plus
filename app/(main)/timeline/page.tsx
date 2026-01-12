@@ -89,6 +89,7 @@ export default function HomePage() {
     const [comments, setComments] = useState<Comment[]>([]);
     const [newComment, setNewComment] = useState("");
     const [isSendingComment, setIsSendingComment] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
 
     // --- 初期データ読み込み ---
     useEffect(() => {
@@ -115,6 +116,7 @@ export default function HomePage() {
     }, []);
 
     const fetchData = async (userId: string) => {
+        setIsLoading(true);
         // 1. 自分のプロフィール取得 (Supabaseのprofilesテーブル)
         let { data: profileData } = await supabase
             .from('profiles')
@@ -131,18 +133,8 @@ export default function HomePage() {
                 goal: "目標未設定",
                 bio: "",
             };
-            console.log("プロフィール作成を試行:", newProfile);
-            const { data, error } = await supabase.from('profiles').insert(newProfile).select().single();
-            if (data) {
-                profileData = data;
-                console.log("プロフィール作成成功:", data);
-            } else {
-                console.error("プロフィールの作成に失敗しました:");
-                console.error("エラーコード:", error?.code);
-                console.error("エラーメッセージ:", error?.message);
-                console.error("エラー詳細:", error?.details);
-                console.error("エラーヒント:", error?.hint);
-            }
+            const { data } = await supabase.from('profiles').insert(newProfile).select().single();
+            if (data) profileData = data;
         }
 
         if (profileData) setMyProfile(profileData);
@@ -163,13 +155,11 @@ export default function HomePage() {
             .eq('user_id', userId);
         const myLikedPostIds = new Set(myLikesData ? myLikesData.map((l: any) => l.post_id) : []);
 
-        // 4. 投稿一覧を取得（シンプルなクエリに変更）
+        // 4. 投稿一覧を取得
         const { data: postsData, error: postsError } = await supabase
             .from('posts')
             .select('*, profiles(id, name, avatar_url, goal)')
             .order('created_at', { ascending: false });
-
-        console.log('Posts query result:', { postsData, postsError });
 
         if (postsError) {
             console.error('投稿の取得に失敗:', postsError);
@@ -179,21 +169,11 @@ export default function HomePage() {
             // 各投稿のいいね数とコメント数を個別に取得
             const formattedPosts = await Promise.all(
                 postsData.map(async (p: any) => {
-                    // デバッグ: 投稿データの構造を確認
-                    console.log('投稿データ:', {
-                        id: p.id,
-                        user_id: p.user_id,
-                        profiles: p.profiles,
-                        content: p.content?.substring(0, 20)
-                    });
-
-                    // いいね数を取得
                     const { count: likeCount } = await supabase
                         .from('likes')
                         .select('*', { count: 'exact', head: true })
                         .eq('post_id', p.id);
 
-                    // コメント数を取得
                     const { count: commentCount } = await supabase
                         .from('comments')
                         .select('*', { count: 'exact', head: true })
@@ -207,17 +187,19 @@ export default function HomePage() {
                     };
                 })
             );
-            console.log('Formatted posts:', formattedPosts);
             setPosts(formattedPosts);
         }
 
         // 5. 完了タスク
-        const { data: tasksData } = await supabase
-            .from('tasks')
-            .select('*')
-            .eq('user_id', user.id)
-            .eq('is_completed', true);
-        if (tasksData) setMyTasks(tasksData);
+        if (user) {
+            const { data: tasksData } = await supabase
+                .from('tasks')
+                .select('*')
+                .eq('user_id', user.id)
+                .eq('is_completed', true);
+            if (tasksData) setMyTasks(tasksData);
+        }
+        setIsLoading(false);
     };
 
     // --- 投稿削除 ---
