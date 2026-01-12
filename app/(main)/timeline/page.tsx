@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Heart, MessageCircle, Share2, MoreHorizontal, Image as ImageIcon, Send, CheckCircle2, X as XIcon, Plus, Trash2, Copy } from 'lucide-react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
+import { useUser } from '@clerk/nextjs';
 
 // --- 時間を「○分前」形式にする関数 ---
 const getRelativeTime = (dateString: string) => {
@@ -19,7 +20,7 @@ const getRelativeTime = (dateString: string) => {
     const diffInDays = Math.floor(diffInHours / 24);
     if (diffInDays < 7) return `${diffInDays}日前`;
 
-    return past.toLocaleDateString('ja-JP'); // 1週間以上前は日付
+    return past.toLocaleDateString('ja-JP');
 };
 
 // --- 型定義 ---
@@ -35,21 +36,17 @@ type Comment = {
     content: string;
     created_at: string;
     user_id: string;
-    profiles?: Profile; // 結合用
+    profiles?: Profile;
 };
 
 type Post = {
     id: number;
-    user_id: string; // 追加: 削除判定用
+    user_id: string;
     content: string;
     image_url?: string;
     linked_task?: string;
-    // likes: number; // DBのカウンターは参考程度にする
-    // comments: number;
     created_at: string;
     profiles: Profile | null;
-
-    // アプリ内計算用
     like_count: number;
     comment_count: number;
     has_liked: boolean;
@@ -60,23 +57,19 @@ type Task = {
     title: string;
 };
 
-import { useUser } from '@clerk/nextjs'; // Clerkのフックを追加
-
 export default function HomePage() {
     // --- 状態管理 ---
-    const { user, isLoaded } = useUser(); // Clerkからユーザー情報を取得
+    const { user, isLoaded } = useUser();
     const [posts, setPosts] = useState<Post[]>([]);
     const [myProfile, setMyProfile] = useState<Profile | null>(null);
     const [myTasks, setMyTasks] = useState<Task[]>([]);
-    const [myFollowings, setMyFollowings] = useState<string[]>([]); // フォロー中のIDリスト
+    const [myFollowings, setMyFollowings] = useState<string[]>([]);
 
-    // UI制御用
     const [activeTab, setActiveTab] = useState<'recommend' | 'following'>('recommend');
     const [isHeaderVisible, setIsHeaderVisible] = useState(true);
     const lastScrollY = useRef(0);
-    const [openMenuPostId, setOpenMenuPostId] = useState<number | null>(null); // メニューを開いている投稿ID
+    const [openMenuPostId, setOpenMenuPostId] = useState<number | null>(null);
 
-    // 投稿フォーム用 (モーダル)
     const [isPostModalOpen, setIsPostModalOpen] = useState(false);
     const [newPostContent, setNewPostContent] = useState("");
     const [selectedTask, setSelectedTask] = useState<string | null>(null);
@@ -84,7 +77,6 @@ export default function HomePage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isPosting, setIsPosting] = useState(false);
 
-    // 詳細・コメント用
     const [selectedPost, setSelectedPost] = useState<Post | null>(null);
     const [comments, setComments] = useState<Comment[]>([]);
     const [newComment, setNewComment] = useState("");
@@ -96,7 +88,7 @@ export default function HomePage() {
         if (isLoaded && user) {
             fetchData(user.id);
         }
-    }, [isLoaded, user]); // ユーザーがロードされたら実行
+    }, [isLoaded, user]);
 
     // スクロール制御
     useEffect(() => {
@@ -105,7 +97,7 @@ export default function HomePage() {
             if (currentScrollY < 0) return;
             if (currentScrollY > lastScrollY.current && currentScrollY > 50) {
                 setIsHeaderVisible(false);
-                setOpenMenuPostId(null); // スクロールしたらメニューを閉じる
+                setOpenMenuPostId(null);
             } else {
                 setIsHeaderVisible(true);
             }
@@ -117,14 +109,13 @@ export default function HomePage() {
 
     const fetchData = async (userId: string) => {
         setIsLoading(true);
-        // 1. 自分のプロフィール取得 (Supabaseのprofilesテーブル)
+        // 1. プロフィール取得
         let { data: profileData } = await supabase
             .from('profiles')
             .select('*')
             .eq('id', userId)
             .single();
 
-        // プロフィールがない場合は作成する（初回ログイン時など）
         if (!profileData && user) {
             const newProfile = {
                 id: userId,
@@ -148,25 +139,22 @@ export default function HomePage() {
         const followingIds = followsData ? followsData.map((f: any) => f.following_id) : [];
         setMyFollowings(followingIds);
 
-        // 3. 自分が「いいね」した投稿IDリストを取得
+        // 3. いいね済みリスト
         const { data: myLikesData } = await supabase
             .from('likes')
             .select('post_id')
             .eq('user_id', userId);
         const myLikedPostIds = new Set(myLikesData ? myLikesData.map((l: any) => l.post_id) : []);
 
-        // 4. 投稿一覧を取得
+        // 4. 投稿一覧取得
         const { data: postsData, error: postsError } = await supabase
             .from('posts')
             .select('*, profiles(id, name, avatar_url, goal)')
             .order('created_at', { ascending: false });
 
-        if (postsError) {
-            console.error('投稿の取得に失敗:', postsError);
-        }
+        if (postsError) console.error('投稿取得エラー:', postsError);
 
         if (postsData) {
-            // 各投稿のいいね数とコメント数を個別に取得
             const formattedPosts = await Promise.all(
                 postsData.map(async (p: any) => {
                     const { count: likeCount } = await supabase
@@ -202,29 +190,22 @@ export default function HomePage() {
         setIsLoading(false);
     };
 
-    // --- 投稿削除 ---
     const deletePost = async (postId: number) => {
         if (!confirm("本当にこの投稿を削除しますか？")) return;
-
-        // UIから削除
         setPosts(posts.filter(p => p.id !== postId));
-
-        // DBから削除
         const { error } = await supabase.from('posts').delete().eq('id', postId);
         if (error) alert("削除に失敗しました");
         setOpenMenuPostId(null);
     };
 
-    // --- 共有機能 ---
     const handleShare = (postId: number) => {
-        // 仮のURLを作成
         const url = `${window.location.origin}/post/${postId}`;
         navigator.clipboard.writeText(url).then(() => {
             alert("リンクをコピーしました！");
         });
     };
 
-    // --- いいね機能 (DB永続化) ---
+    // --- いいね機能 (通知機能追加済み) ---
     const toggleLike = async (postId: number, e: React.MouseEvent) => {
         e.stopPropagation();
         if (!myProfile) return;
@@ -235,33 +216,44 @@ export default function HomePage() {
         const isLiked = targetPost.has_liked;
         const newLikeCount = isLiked ? targetPost.like_count - 1 : targetPost.like_count + 1;
 
-        // 1. UI更新 (Optimistic update)
+        // UI更新
         setPosts(posts.map(p =>
             p.id === postId
                 ? { ...p, like_count: newLikeCount, has_liked: !isLiked }
                 : p
         ));
 
-        // 2. DB更新
+        // DB更新
         if (isLiked) {
-            // いいね取り消し
             await supabase
                 .from('likes')
                 .delete()
                 .eq('user_id', myProfile.id)
                 .eq('post_id', postId);
         } else {
-            // いいね付与
+            // いいね追加
             await supabase
                 .from('likes')
                 .insert({ user_id: myProfile.id, post_id: postId });
+
+            // ▼▼▼ 追加: いいね通知を送信 ▼▼▼
+            // 自分自身の投稿へのいいねでなければ通知を送る
+            if (targetPost.user_id !== myProfile.id) {
+                await supabase.from('notifications').insert({
+                    user_id: targetPost.user_id, // 投稿主へ
+                    actor_id: myProfile.id,      // 自分から
+                    type: 'like',
+                    content: targetPost.content, // どの投稿か分かるように本文を入れる
+                    link_id: String(postId),     // リンク先
+                    is_read: false
+                });
+            }
         }
     };
 
-    // --- 詳細表示 & コメント取得 ---
+    // --- 詳細表示 ---
     const handlePostClick = async (post: Post) => {
         setSelectedPost(post);
-        // コメントを取得
         const { data } = await supabase
             .from('comments')
             .select(`*, profiles(name, avatar_url)`)
@@ -271,7 +263,7 @@ export default function HomePage() {
         if (data) setComments(data as any);
     };
 
-    // --- コメント送信 ---
+    // --- コメント送信 (通知機能追加済み) ---
     const handleCommentSubmit = async () => {
         if (!newComment.trim() || !selectedPost || !myProfile) return;
         setIsSendingComment(true);
@@ -283,41 +275,80 @@ export default function HomePage() {
                 post_id: selectedPost.id,
                 content: newComment
             })
-            .select('*, profiles(name, avatar_url)') // 挿入後にデータを取得して表示に追加
+            .select('*, profiles(name, avatar_url)')
             .single();
 
         if (!error && data) {
             setComments([...comments, data as any]);
             setNewComment("");
-            // 一覧側のコメント数も更新
             setPosts(posts.map(p =>
                 p.id === selectedPost.id ? { ...p, comment_count: p.comment_count + 1 } : p
             ));
+
+            // ▼▼▼ 追加: コメント通知を送信 ▼▼▼
+            if (selectedPost.user_id !== myProfile.id) {
+                await supabase.from('notifications').insert({
+                    user_id: selectedPost.user_id, // 投稿主へ
+                    actor_id: myProfile.id,        // 自分から
+                    type: 'comment',
+                    content: newComment,           // コメント内容
+                    link_id: String(selectedPost.id),
+                    is_read: false
+                });
+            }
         }
         setIsSendingComment(false);
     };
 
-    // --- 投稿送信 ---
+    // --- 投稿送信 (通知機能追加済み) ---
     const handlePostSubmit = async () => {
         if (!newPostContent && !selectedTask) return;
         if (!myProfile) return;
 
         setIsPosting(true);
-        // 本来はStorageに画像を上げてURLを取得する処理が必要ですが省略
-        const { error } = await supabase.from('posts').insert({
+
+        // 1. 投稿を作成
+        const { data: newPost, error } = await supabase.from('posts').insert({
             user_id: myProfile.id,
             content: newPostContent,
             linked_task: selectedTask,
-        });
+        }).select().single(); // IDを取得するためにselectを追加
 
         if (error) {
             alert("投稿に失敗しました: " + error.message);
-        } else {
+        } else if (newPost) {
             setNewPostContent("");
             setSelectedTask(null);
             setSelectedImage(null);
             setIsPostModalOpen(false);
-            fetchData(myProfile.id); // 再取得
+            fetchData(myProfile.id);
+
+            // ▼▼▼ 追加: フォロワーへ通知を一斉送信 ▼▼▼
+            // 1. 自分のフォロワーを取得
+            const { data: followers } = await supabase
+                .from('follows')
+                .select('follower_id')
+                .eq('following_id', myProfile.id);
+
+            if (followers && followers.length > 0) {
+                // 2. 通知の種類を決定 (タスク完了 or 通常投稿)
+                const notifType = selectedTask ? 'followed_task_complete' : 'followed_post';
+                const notifTitle = selectedTask ? selectedTask : '新規投稿'; // タスク名またはタイトル
+
+                // 3. 通知データを作成 (フォロワー全員分)
+                const notificationsToInsert = followers.map(f => ({
+                    user_id: f.follower_id,       // フォロワーへ
+                    actor_id: myProfile.id,       // 自分から
+                    type: notifType,
+                    title: notifTitle,            // タスク名など
+                    content: newPostContent,      // 投稿本文
+                    link_id: String(newPost.id),  // 投稿ID
+                    is_read: false
+                }));
+
+                // 4. 一括挿入
+                await supabase.from('notifications').insert(notificationsToInsert);
+            }
         }
         setIsPosting(false);
     };
@@ -332,15 +363,13 @@ export default function HomePage() {
     });
 
     return (
-        <div className="bg-white min-h-screen pb-24"> {/* FABのために下の余白を増やす */}
-
+        <div className="bg-white min-h-screen pb-24">
             {/* === ヘッダー === */}
             <header
                 className={`fixed top-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-b border-gray-100 transition-transform duration-300 ${isHeaderVisible ? 'translate-y-0' : '-translate-y-full'
                     }`}
             >
                 <div className="px-4 h-14 flex items-center justify-start">
-                    {/* 左上のロゴ画像 */}
                     <div className="w-8 h-8 relative">
                         <img
                             src="/logo.png"
@@ -354,7 +383,6 @@ export default function HomePage() {
                     </div>
                 </div>
 
-                {/* タブ */}
                 <div className="flex w-full">
                     <button
                         onClick={() => { setActiveTab('recommend'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
@@ -380,7 +408,7 @@ export default function HomePage() {
                 {displayedPosts.map((post) => (
                     <article
                         key={post.id}
-                        onClick={() => handlePostClick(post)} // 詳細を開く
+                        onClick={() => handlePostClick(post)}
                         className="bg-white p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors relative"
                     >
                         <div className="flex gap-3">
@@ -406,7 +434,6 @@ export default function HomePage() {
                                         <span className="text-gray-400 text-xs flex-shrink-0">· {getRelativeTime(post.created_at)}</span>
                                     </div>
 
-                                    {/* 自分の投稿なら削除メニューを表示 */}
                                     <div className="relative">
                                         <button
                                             className="text-gray-400 hover:text-sky-500 rounded-full p-1 hover:bg-sky-50 transition-colors"
@@ -447,14 +474,12 @@ export default function HomePage() {
                                     </div>
                                 )}
 
-                                {/* アクションボタン (左から: コメント、いいね、共有) */}
                                 <div className="flex items-center justify-between mt-3 max-w-xs pr-4">
-                                    {/* 1. コメント */}
                                     <button
                                         className="group flex items-center gap-1.5 text-gray-500 hover:text-sky-500 transition-colors"
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            handlePostClick(post); // コメントするために詳細を開く
+                                            handlePostClick(post);
                                         }}
                                     >
                                         <div className="p-2 rounded-full group-hover:bg-sky-50">
@@ -463,7 +488,6 @@ export default function HomePage() {
                                         <span className="text-xs group-hover:text-sky-500">{post.comment_count > 0 && post.comment_count}</span>
                                     </button>
 
-                                    {/* 2. いいね */}
                                     <button
                                         onClick={(e) => toggleLike(post.id, e)}
                                         className={`group flex items-center gap-1.5 transition-colors ${post.has_liked ? 'text-pink-600' : 'text-gray-500 hover:text-pink-600'
@@ -475,7 +499,6 @@ export default function HomePage() {
                                         <span className="text-xs">{post.like_count > 0 && post.like_count}</span>
                                     </button>
 
-                                    {/* 3. 共有 */}
                                     <button
                                         onClick={(e) => { e.stopPropagation(); handleShare(post.id); }}
                                         className="group flex items-center gap-1.5 text-gray-500 hover:text-green-500 transition-colors"
@@ -497,8 +520,7 @@ export default function HomePage() {
                 )}
             </div>
 
-            {/* === フローティング投稿ボタン (FAB) === */}
-            {/* bottom-24 にして下のバー（想定h-16くらい）と被らないように調整 */}
+            {/* === FAB === */}
             <button
                 onClick={() => setIsPostModalOpen(true)}
                 className="fixed bottom-24 right-6 w-14 h-14 bg-sky-500 hover:bg-sky-600 text-white rounded-full shadow-lg flex items-center justify-center transition-transform hover:scale-105 active:scale-95 z-40"
@@ -549,15 +571,12 @@ export default function HomePage() {
                 selectedPost && (
                     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setSelectedPost(null)}>
                         <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-                            {/* ヘッダー */}
                             <div className="p-4 border-b border-gray-100 flex items-center justify-between">
                                 <h3 className="font-bold">投稿</h3>
                                 <button onClick={() => setSelectedPost(null)}><XIcon className="w-6 h-6 text-gray-500" /></button>
                             </div>
 
-                            {/* コンテンツエリア (スクロール可) */}
                             <div className="overflow-y-auto flex-1 p-4">
-                                {/* 親投稿 */}
                                 <div className="flex gap-3 mb-4">
                                     <img src={selectedPost.profiles?.avatar_url} className="w-12 h-12 rounded-full border border-gray-100" />
                                     <div>
@@ -569,7 +588,6 @@ export default function HomePage() {
 
                                 <hr className="border-gray-100 my-4" />
 
-                                {/* コメント一覧 */}
                                 <div className="space-y-4">
                                     {comments.map(comment => (
                                         <div key={comment.id} className="flex gap-3">
@@ -587,7 +605,6 @@ export default function HomePage() {
                                 </div>
                             </div>
 
-                            {/* 返信フォーム (最下部固定) */}
                             <div className="p-3 border-t border-gray-100 bg-white flex gap-2 items-center">
                                 <img src={myProfile?.avatar_url} className="w-8 h-8 rounded-full bg-gray-200" />
                                 <input

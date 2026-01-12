@@ -1,16 +1,17 @@
 ﻿"use client";
 
 import React, { useState, useEffect } from 'react';
-import { User, Settings, Camera, CheckCircle2, Trophy, Edit3, Save, X, Users } from 'lucide-react';
-import { useUser } from '@clerk/nextjs';
-import { supabase } from '@/lib/supabaseClient';
+import { User, Settings, Camera, CheckCircle2, Trophy, Edit3, Save, X, Users, Flame } from 'lucide-react';
+import { useUser, useAuth } from '@clerk/nextjs';
+import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 
 // --- 型定義 ---
 interface CompletedTask {
-    id: number;
+    id: string;
     title: string;
-    completed_at: string;
-    deadline: string;
+    completed_at: string | null;
+    created_at: string;
+    deadline: string | null;
 }
 
 interface Profile {
@@ -23,10 +24,12 @@ interface Profile {
 
 export default function ProfilePage() {
     const { user, isLoaded } = useUser();
+    const { getToken } = useAuth();
 
     // --- 状態管理 ---
     const [profile, setProfile] = useState<Profile | null>(null);
     const [completedTasks, setCompletedTasks] = useState<CompletedTask[]>([]);
+    const [streak, setStreak] = useState(0);
     const [isEditing, setIsEditing] = useState(false);
     const [isPrivate, setIsPrivate] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -48,6 +51,8 @@ export default function ProfilePage() {
     }, [isLoaded, user]);
 
     const fetchProfileData = async (userId: string) => {
+        const supabase = await createClerkSupabaseClient(getToken);
+
         // 1. プロフィール取得
         let { data: profileData, error: profileError } = await supabase
             .from('profiles')
@@ -102,16 +107,76 @@ export default function ProfilePage() {
         setFollowerCount(followerCnt || 0);
 
         // 4. 完了タスク取得
-        const { data: tasksData } = await supabase
+        const { data: tasksData, error: tasksError } = await supabase
             .from('tasks')
             .select('*')
             .eq('user_id', userId)
             .eq('is_completed', true)
-            .order('completed_at', { ascending: false });
+            .order('created_at', { ascending: false });
+
+        if (tasksError) {
+            console.error("タスク取得エラー:", tasksError);
+        }
 
         if (tasksData) {
-            setCompletedTasks(tasksData);
+            const formattedTasks: CompletedTask[] = tasksData.map((task: any) => ({
+                id: task.id,
+                title: task.title,
+                completed_at: task.completed_at || task.updated_at || task.created_at,
+                created_at: task.created_at,
+                deadline: task.deadline || task.due_date || null,
+            }));
+            setCompletedTasks(formattedTasks);
+            calculateStreak(formattedTasks);
         }
+    };
+
+    // ストリーク計算関数
+    const calculateStreak = (tasks: CompletedTask[]) => {
+        if (!tasks || tasks.length === 0) {
+            setStreak(0);
+            return;
+        }
+
+        const completedDates = new Set<string>();
+        tasks.forEach(task => {
+            const dateStr = task.completed_at || task.created_at;
+            if (dateStr) {
+                const d = new Date(dateStr);
+                completedDates.add(d.toLocaleDateString('ja-JP'));
+            }
+        });
+
+        let currentStreak = 0;
+        const today = new Date();
+        const checkDate = new Date(today);
+
+        const todayStr = checkDate.toLocaleDateString('ja-JP');
+        const yesterdayDate = new Date(today);
+        yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+        const yesterdayStr = yesterdayDate.toLocaleDateString('ja-JP');
+
+        if (completedDates.has(todayStr)) {
+            // 今日やった
+        } else if (completedDates.has(yesterdayStr)) {
+            // 今日まだだけど昨日はやった
+            checkDate.setDate(checkDate.getDate() - 1);
+        } else {
+            setStreak(0);
+            return;
+        }
+
+        while (true) {
+            const dateStr = checkDate.toLocaleDateString('ja-JP');
+            if (completedDates.has(dateStr)) {
+                currentStreak++;
+                checkDate.setDate(checkDate.getDate() - 1);
+            } else {
+                break;
+            }
+        }
+
+        setStreak(currentStreak);
     };
 
     // --- 保存処理 ---
@@ -119,6 +184,7 @@ export default function ProfilePage() {
         if (!user || !profile) return;
 
         setIsSaving(true);
+        const supabase = await createClerkSupabaseClient(getToken);
 
         const { error } = await supabase
             .from('profiles')
@@ -225,6 +291,7 @@ export default function ProfilePage() {
                         {/* 編集モードの切り替え */}
                         {isEditing ? (
                             <div className="w-full mt-6 space-y-4">
+                                {/* 編集フォームの内容 (変更なし) */}
                                 <div>
                                     <label className="text-xs font-bold text-gray-400 block mb-1 text-left">ニックネーム</label>
                                     <input
@@ -270,11 +337,37 @@ export default function ProfilePage() {
                                 </div>
                             </div>
                         ) : (
-                            <div className="w-full mt-4 flex flex-col items-center">
-                                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                                    {profile.name}
-                                    {isPrivate && <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded border border-gray-200">鍵</span>}
-                                </h2>
+                            // ★修正箇所: デザインのみ変更★
+                            <div className="w-full mt-4 flex flex-col items-center relative px-4">
+
+                                {/* コンテナ: 親要素を relative にして名前を中央、ストリークを絶対配置で右に */}
+                                <div className="relative w-full flex justify-center items-center">
+
+                                    {/* 名前: 常に中央配置 */}
+                                    <h2 className="text-xl font-bold text-gray-800 flex items-center justify-center gap-2 truncate max-w-[60%]">
+                                        {profile.name}
+                                        {isPrivate && <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded border border-gray-200 font-normal">鍵</span>}
+                                    </h2>
+
+                                    {/* ストリーク表示: 絶対配置で右側へ & 名前と垂直中央揃え */}
+                                    {streak > 0 && (
+                                        <div className="absolute right-8 top-1/2 -translate-y-1/2 flex items-center animate-in zoom-in duration-300">
+                                            {/* 四角い枠 (Badge Box) */}
+                                            <div className="relative border border-gray-300 rounded-md px-2.5 py-0.5 bg-white shadow-sm">
+
+                                                {/* 炎アイコン: 四角の左上の線上に配置 */}
+                                                {streak >= 10 && (
+                                                    <Flame className="absolute -top-3.5 -left-2.5 w-5 h-5 text-orange-500 fill-orange-500 stroke-white stroke-2" />
+                                                )}
+
+                                                {/* 数字: 黒色 */}
+                                                <span className="text-sm font-bold text-gray-800 tabular-nums">
+                                                    {streak}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
 
                                 {/* 目標表示エリア */}
                                 <div className="mt-3 px-4 py-2 bg-orange-50 border border-orange-100 text-orange-700 rounded-lg font-bold text-sm flex items-center gap-2 animate-in fade-in">
@@ -324,7 +417,7 @@ export default function ProfilePage() {
                                             <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-400">
                                                 <span>期限: {task.deadline || '未設定'}</span>
                                                 <span className="text-gray-300">|</span>
-                                                <span>完了: {task.completed_at ? new Date(task.completed_at).toLocaleDateString('ja-JP') : '未設定'}</span>
+                                                <span>完了: {task.completed_at ? new Date(task.completed_at).toLocaleDateString('ja-JP') : (task.created_at ? new Date(task.created_at).toLocaleDateString('ja-JP') : '未設定')}</span>
                                             </div>
                                         </div>
                                     </div>
