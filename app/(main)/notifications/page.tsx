@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Heart, MessageCircle, UserPlus, Clock, AlertTriangle, CheckCircle2, FileText, ArrowLeft, Bell } from 'lucide-react';
+import { Heart, MessageCircle, UserPlus, Clock, AlertTriangle, CheckCircle2, ArrowLeft, Bell } from 'lucide-react';
 import { useUser, useAuth } from '@clerk/nextjs';
 import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
@@ -13,8 +13,8 @@ type NotificationType = 'like' | 'comment' | 'follow' | 'deadline_today' | 'dead
 interface Notification {
     id: string;
     type: NotificationType;
-    actor_id: string; // 通知を送った人のID
-    actor_data?: {    // 後から結合するプロフィール情報
+    actor_id: string;
+    actor_data?: {
         name: string;
         avatar_url: string;
     };
@@ -43,56 +43,65 @@ export default function NotificationsPage() {
         setIsLoading(true);
         const supabase = await createClerkSupabaseClient(getToken);
 
-        // 1. まず期限切れチェックを行う（通知を作る）
+        // 1. まず期限切れチェックを行う（ここで自動で通知データを作る）
         await checkDeadlines(supabase, user!.id);
 
-        // 2. その後、通知一覧を取得する
+        // 2. その後、最新の通知一覧を取得する
         await fetchNotifications(supabase, user!.id);
     };
 
-    // --- 期限チェックロジック（変更なし） ---
+    // --- ★タスク期限チェックロジック★ ---
     const checkDeadlines = async (supabase: any, userId: string) => {
+        // 未完了のタスクを取得
         const { data: tasks } = await supabase
             .from('tasks')
             .select('*')
             .eq('user_id', userId)
-            .eq('is_completed', false);
+            .eq('is_completed', false)
+            .not('deadline', 'is', null); // 期限があるものだけ
 
-        if (!tasks) return;
+        if (!tasks || tasks.length === 0) return;
 
         const today = new Date();
+        today.setHours(0, 0, 0, 0); // 時間をリセットして日付だけで比較
 
         for (const task of tasks) {
-            if (!task.deadline) continue;
-
             const deadlineDate = new Date(task.deadline);
-            let type: NotificationType | null = null;
-
-            today.setHours(0, 0, 0, 0);
             deadlineDate.setHours(0, 0, 0, 0);
 
+            let type: NotificationType | null = null;
+            let content = "";
+
+            // 期限比較
             if (deadlineDate.getTime() < today.getTime()) {
+                // 期限切れ
                 type = 'deadline_overdue';
+                content = "タスクの期限が過ぎています";
             } else if (deadlineDate.getTime() === today.getTime()) {
+                // 本日が期限（残り24時間以内）
                 type = 'deadline_today';
+                content = "今日までのタスクがあります";
             }
 
             if (type) {
-                // 重複チェック
+                // まだ通知していなければ作成（重複防止）
+                // 同じタスク、同じタイプ、同じ日の通知があるかチェック
                 const { data: existing } = await supabase
                     .from('notifications')
                     .select('id')
                     .eq('user_id', userId)
-                    .eq('link_id', task.id)
+                    .eq('link_id', task.id.toString()) // タスクIDで紐付け
                     .eq('type', type)
-                    .single();
+                    .gte('created_at', today.toISOString()) // 「今日作成されたもの」があるか
+                    .limit(1);
 
-                if (!existing) {
+                if (!existing || existing.length === 0) {
                     await supabase.from('notifications').insert({
                         user_id: userId,
                         type: type,
                         title: task.title,
-                        link_id: task.id,
+                        content: content,
+                        link_id: task.id.toString(),
                         is_read: false
                     });
                 }
@@ -100,9 +109,8 @@ export default function NotificationsPage() {
         }
     };
 
-    // --- 【修正ポイント】安全な通知取得ロジック ---
+    // --- 通知取得ロジック ---
     const fetchNotifications = async (supabase: any, userId: string) => {
-        // A. まず通知データだけ取得 (JOINしない)
         const { data: notifData, error } = await supabase
             .from('notifications')
             .select('*')
@@ -111,12 +119,7 @@ export default function NotificationsPage() {
             .limit(50);
 
         if (error) {
-            console.error("通知取得エラー:", {
-                message: error.message,
-                details: error.details,
-                hint: error.hint,
-                code: error.code
-            });
+            console.error("通知取得エラー:", error);
             setIsLoading(false);
             return;
         }
@@ -127,12 +130,10 @@ export default function NotificationsPage() {
             return;
         }
 
-        // B. 通知の中に含まれる「相手のID」をリストアップ
+        // ユーザー情報の取得（フォロー通知やいいね通知用）
         const actorIds = [...new Set(notifData.map((n: any) => n.actor_id).filter(Boolean))];
-
         let profileMap = new Map();
 
-        // C. 相手のプロフィール情報を別途取得してマッピング
         if (actorIds.length > 0) {
             const { data: profilesData } = await supabase
                 .from('profiles')
@@ -142,7 +143,6 @@ export default function NotificationsPage() {
             profilesData?.forEach((p: any) => profileMap.set(p.id, p));
         }
 
-        // D. 通知データとプロフィールデータを手動で合体
         const formattedNotifications = notifData.map((n: any) => ({
             ...n,
             actor_data: n.actor_id ? profileMap.get(n.actor_id) : null
@@ -150,7 +150,7 @@ export default function NotificationsPage() {
 
         setNotifications(formattedNotifications);
 
-        // 未読を既読にする処理
+        // 未読を既読にする
         const hasUnread = formattedNotifications.some((n: any) => !n.is_read);
         if (hasUnread) {
             setTimeout(async () => {
@@ -160,6 +160,7 @@ export default function NotificationsPage() {
                     .eq('user_id', userId)
                     .eq('is_read', false);
 
+                // 画面上の未読表示も消す
                 setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
             }, 2000);
         }
@@ -167,18 +168,19 @@ export default function NotificationsPage() {
         setIsLoading(false);
     };
 
-    // --- 画面表示用ロジック ---
+    // --- 画面遷移用ロジック ---
     const handleNotificationClick = (notification: Notification) => {
-        if (!notification.link_id) return;
-
+        // タスク系通知ならタスクページへ
         if (['deadline_today', 'deadline_overdue', 'followed_task_complete'].includes(notification.type)) {
-            // タスクページへ（必要に応じてURLを調整してください）
-            // router.push(`/tasks?id=${notification.link_id}`);
-            alert("タスク画面へ移動します");
-        } else {
-            // 投稿詳細ページへ（必要に応じてURLを調整してください）
-            // router.push(`/post/${notification.link_id}`);
-            alert("投稿画面へ移動します");
+            router.push(`/tasks`);
+        }
+        // フォロー通知ならその人のプロフィールへ
+        else if (notification.type === 'follow') {
+            router.push(`/user/${notification.actor_id}`);
+        }
+        // それ以外（いいね、コメント）は投稿詳細へ
+        else if (notification.link_id) {
+            router.push(`/post/${notification.link_id}`);
         }
     };
 
@@ -193,7 +195,7 @@ export default function NotificationsPage() {
         return date.toLocaleDateString('ja-JP');
     };
 
-    // アイコンの定義
+    // アイコン定義
     const renderIcon = (type: NotificationType) => {
         switch (type) {
             case 'followed_post': return <div className="bg-orange-100 p-2 rounded-full"><Bell className="w-5 h-5 text-orange-500" /></div>;
@@ -201,23 +203,54 @@ export default function NotificationsPage() {
             case 'like': return <div className="bg-pink-100 p-2 rounded-full"><Heart className="w-5 h-5 text-pink-500 fill-pink-500" /></div>;
             case 'comment': return <div className="bg-sky-100 p-2 rounded-full"><MessageCircle className="w-5 h-5 text-sky-500 fill-sky-100" /></div>;
             case 'follow': return <div className="bg-indigo-100 p-2 rounded-full"><UserPlus className="w-5 h-5 text-indigo-500" /></div>;
+
+            // ▼ タスク通知アイコン
             case 'deadline_today': return <div className="bg-amber-100 p-2 rounded-full"><Clock className="w-5 h-5 text-amber-600" /></div>;
             case 'deadline_overdue': return <div className="bg-red-100 p-2 rounded-full"><AlertTriangle className="w-5 h-5 text-red-600" /></div>;
+
             default: return <div className="bg-gray-100 p-2 rounded-full"><Bell className="w-5 h-5 text-gray-400" /></div>;
         }
     };
 
-    // メッセージの定義
+    // メッセージ定義
     const renderContent = (n: Notification) => {
         const name = n.actor_data?.name || "誰か";
+        const postContent = n.content || "投稿";
+
         switch (n.type) {
+            // いいね
+            case 'like':
+                return (
+                    <div>
+                        <span className="font-bold">{name}</span>さんがあなたの投稿にいいねしました
+                        <div className="mt-1 pl-2 border-l-2 border-gray-200 text-xs text-gray-500 line-clamp-1">
+                            {postContent}
+                        </div>
+                    </div>
+                );
+            // コメント
+            case 'comment': return <><span className="font-bold">{name}</span>さんがコメントしました</>;
+            // フォロー（追加しました）
+            case 'follow': return <><span className="font-bold">{name}</span>さんがあなたをフォローしました</>;
+
+            // ▼ タスク通知（文言を要望通りに修正）
+            case 'deadline_today':
+                return (
+                    <div>
+                        <span className="font-bold text-amber-600">今日までのタスクがあります</span>
+                        <div className="text-gray-600 text-xs mt-0.5">「{n.title}」の期限は今日です</div>
+                    </div>
+                );
+            case 'deadline_overdue':
+                return (
+                    <div>
+                        <span className="font-bold text-red-600">タスクの期限が過ぎています</span>
+                        <div className="text-gray-600 text-xs mt-0.5">「{n.title}」は未完了のままです</div>
+                    </div>
+                );
+
             case 'followed_post': return <><span className="font-bold">{name}</span>さんが投稿しました</>;
             case 'followed_task_complete': return <><span className="font-bold">{name}</span>さんがタスク「{n.title}」を完了！</>;
-            case 'like': return <><span className="font-bold">{name}</span>さんが「いいね」しました</>;
-            case 'comment': return <><span className="font-bold">{name}</span>さんがコメントしました</>;
-            case 'follow': return <><span className="font-bold">{name}</span>さんがフォローしました</>;
-            case 'deadline_today': return <span className="font-bold text-orange-600">タスク「{n.title}」の期限は今日です</span>;
-            case 'deadline_overdue': return <span className="font-bold text-red-600">タスク「{n.title}」の期限が過ぎています</span>;
             default: return "新しい通知があります";
         }
     };
@@ -244,7 +277,7 @@ export default function NotificationsPage() {
                                 {renderIcon(n.type)}
                             </div>
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm text-gray-800">{renderContent(n)}</p>
+                                <div className="text-sm text-gray-800">{renderContent(n)}</div>
                                 <p className="text-[10px] text-gray-400 mt-1">{formatTime(n.created_at)}</p>
                             </div>
                             {!n.is_read && <div className="w-2 h-2 bg-sky-500 rounded-full self-center flex-shrink-0 animate-pulse" />}

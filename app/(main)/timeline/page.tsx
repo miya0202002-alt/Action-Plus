@@ -3,8 +3,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Heart, MessageCircle, Share2, MoreHorizontal, Image as ImageIcon, Send, CheckCircle2, X as XIcon, Plus, Trash2, Trophy } from 'lucide-react';
 import Link from 'next/link';
-import { useUser, useAuth } from '@clerk/nextjs';
+// ▼▼▼ 変更: 普通のsupabaseではなく、Clerk連携用の関数をインポート ▼▼▼
 import { createClerkSupabaseClient } from '@/lib/supabaseClient';
+import { useUser, useAuth } from '@clerk/nextjs';
 
 // --- 時間を「○分前」形式にする関数 ---
 const getRelativeTime = (dateString: string) => {
@@ -42,7 +43,6 @@ type Comment = {
 type Task = {
     id: number;
     title: string;
-    // 必要に応じて created_at などを追加
 };
 
 type Post = {
@@ -56,13 +56,19 @@ type Post = {
     comment_count: number;
     has_liked: boolean;
     task_id?: number;
-    tasks?: Task | null; // Joinしたタスク情報
+    tasks?: Task | null;
+    task_snapshot?: {
+        id: number;
+        title: string;
+    } | null;
 };
 
 export default function HomePage() {
     // --- 状態管理 ---
     const { user, isLoaded } = useUser();
+    // ▼▼▼ 追加: トークン取得用のフック ▼▼▼
     const { getToken } = useAuth();
+
     const [posts, setPosts] = useState<Post[]>([]);
     const [myProfile, setMyProfile] = useState<Profile | null>(null);
     const [myTasks, setMyTasks] = useState<Task[]>([]);
@@ -114,7 +120,9 @@ export default function HomePage() {
 
     const fetchData = async (userId: string) => {
         setIsLoading(true);
+        // ▼▼▼ 変更: 認証付きクライアントを作成 ▼▼▼
         const supabase = await createClerkSupabaseClient(getToken);
+
         // 1. プロフィール取得
         let { data: profileData } = await supabase
             .from('profiles')
@@ -191,7 +199,6 @@ export default function HomePage() {
                 .select('*')
                 .eq('user_id', user.id)
                 .eq('is_completed', true)
-                // ▼▼▼ 修正箇所: updated_at を created_at に変更 ▼▼▼
                 .order('created_at', { ascending: false })
                 .limit(20);
 
@@ -202,8 +209,11 @@ export default function HomePage() {
 
     const deletePost = async (postId: number) => {
         if (!confirm("本当にこの投稿を削除しますか？")) return;
-        setPosts(posts.filter(p => p.id !== postId));
+
+        // ▼▼▼ 変更: 認証付きクライアントを作成 ▼▼▼
         const supabase = await createClerkSupabaseClient(getToken);
+
+        setPosts(posts.filter(p => p.id !== postId));
         const { error } = await supabase.from('posts').delete().eq('id', postId);
         if (error) alert("削除に失敗しました");
         setOpenMenuPostId(null);
@@ -221,7 +231,9 @@ export default function HomePage() {
         e.stopPropagation();
         if (!myProfile) return;
 
+        // ▼▼▼ 変更: 認証付きクライアントを作成 ▼▼▼
         const supabase = await createClerkSupabaseClient(getToken);
+
         const targetPost = posts.find(p => p.id === postId);
         if (!targetPost) return;
 
@@ -265,7 +277,9 @@ export default function HomePage() {
     // --- 詳細表示 ---
     const handlePostClick = async (post: Post) => {
         setSelectedPost(post);
+        // ▼▼▼ 変更: 認証付きクライアントを作成 ▼▼▼
         const supabase = await createClerkSupabaseClient(getToken);
+
         const { data } = await supabase
             .from('comments')
             .select(`*, profiles(name, avatar_url)`)
@@ -280,7 +294,9 @@ export default function HomePage() {
         if (!newComment.trim() || !selectedPost || !myProfile) return;
         setIsSendingComment(true);
 
+        // ▼▼▼ 変更: 認証付きクライアントを作成 ▼▼▼
         const supabase = await createClerkSupabaseClient(getToken);
+
         const { data, error } = await supabase
             .from('comments')
             .insert({
@@ -312,20 +328,27 @@ export default function HomePage() {
         setIsSendingComment(false);
     };
 
-    // --- 投稿送信 ---
+    // --- 投稿送信 (変更あり) ---
     const handlePostSubmit = async () => {
         if (!newPostContent.trim() && !selectedTask) return;
         if (!myProfile) return;
 
         setIsPosting(true);
+        // ▼▼▼ 変更: 認証付きクライアントを作成 ▼▼▼
         const supabase = await createClerkSupabaseClient(getToken);
 
-        // 1. 投稿を作成
-        const { data: newPost, error } = await supabase.from('posts').insert({
+        const insertData: any = {
             user_id: myProfile.id,
             content: newPostContent,
             task_id: selectedTask ? selectedTask.id : null,
-        }).select().single();
+            task_snapshot: selectedTask ? { id: selectedTask.id, title: selectedTask.title } : null
+        };
+
+        const { data: newPost, error } = await supabase
+            .from('posts')
+            .insert(insertData)
+            .select()
+            .single();
 
         if (error) {
             alert("投稿に失敗しました: " + error.message);
@@ -414,118 +437,123 @@ export default function HomePage() {
 
             {/* === タイムライン === */}
             <div className="max-w-xl mx-auto">
-                {displayedPosts.map((post) => (
-                    <article
-                        key={post.id}
-                        onClick={() => handlePostClick(post)}
-                        className="bg-white p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors relative"
-                    >
-                        <div className="flex gap-3">
-                            <Link href={user && post.user_id === user.id ? "/profile" : `/user/${post.user_id}`} onClick={(e) => e.stopPropagation()} className="flex-shrink-0">
-                                <img
-                                    src={post.profiles?.avatar_url || "https://api.dicebear.com/7.x/avataaars/svg?seed=Guest"}
-                                    alt="avatar"
-                                    className="w-10 h-10 rounded-full border border-gray-100 object-cover"
-                                />
-                            </Link>
+                {displayedPosts.map((post) => {
+                    const taskTitle = post.task_snapshot?.title || post.tasks?.title;
+                    const hasTask = !!taskTitle;
 
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-1.5 min-w-0">
-                                        <Link
-                                            href={user && post.user_id === user.id ? "/profile" : `/user/${post.user_id}`}
-                                            onClick={(e) => e.stopPropagation()}
-                                            className="flex items-center gap-1.5 truncate hover:opacity-70 transition-opacity"
-                                        >
-                                            <span className="font-bold text-gray-900 text-sm truncate">{post.profiles?.name}</span>
-                                            <span className="text-gray-500 text-sm truncate">@{post.profiles?.id?.slice(0, 8)}</span>
-                                        </Link>
-                                        <span className="text-gray-400 text-xs flex-shrink-0">· {getRelativeTime(post.created_at)}</span>
+                    return (
+                        <article
+                            key={post.id}
+                            onClick={() => handlePostClick(post)}
+                            className="bg-white p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors relative"
+                        >
+                            <div className="flex gap-3">
+                                <Link href={user && post.user_id === user.id ? "/profile" : `/user/${post.user_id}`} onClick={(e) => e.stopPropagation()} className="flex-shrink-0">
+                                    <img
+                                        src={post.profiles?.avatar_url || "https://api.dicebear.com/7.x/avataaars/svg?seed=Guest"}
+                                        alt="avatar"
+                                        className="w-10 h-10 rounded-full border border-gray-100 object-cover"
+                                    />
+                                </Link>
+
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                            <Link
+                                                href={user && post.user_id === user.id ? "/profile" : `/user/${post.user_id}`}
+                                                onClick={(e) => e.stopPropagation()}
+                                                className="flex items-center gap-1.5 truncate hover:opacity-70 transition-opacity"
+                                            >
+                                                <span className="font-bold text-gray-900 text-sm truncate">{post.profiles?.name}</span>
+                                                <span className="text-gray-500 text-sm truncate">@{post.profiles?.id?.slice(0, 8)}</span>
+                                            </Link>
+                                            <span className="text-gray-400 text-xs flex-shrink-0">· {getRelativeTime(post.created_at)}</span>
+                                        </div>
+
+                                        <div className="relative">
+                                            <button
+                                                className="text-gray-400 hover:text-sky-500 rounded-full p-1 hover:bg-sky-50 transition-colors"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setOpenMenuPostId(openMenuPostId === post.id ? null : post.id);
+                                                }}
+                                            >
+                                                <MoreHorizontal className="w-4 h-4" />
+                                            </button>
+
+                                            {openMenuPostId === post.id && post.user_id === myProfile?.id && (
+                                                <div className="absolute right-0 top-full bg-white shadow-lg border border-gray-100 rounded-lg z-10 w-24 overflow-hidden">
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); deletePost(post.id); }}
+                                                        className="flex items-center gap-2 w-full text-left px-3 py-2 text-xs text-red-500 hover:bg-red-50"
+                                                    >
+                                                        <Trash2 className="w-3 h-3" />
+                                                        削除
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
 
-                                    <div className="relative">
+                                    <p className="mt-1 text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">{post.content}</p>
+
+                                    {hasTask && (
+                                        <div className="mt-2 border border-gray-200 rounded-xl p-3 bg-white flex items-start gap-3 hover:bg-gray-50 transition-colors">
+                                            <div className="p-2 bg-emerald-100 text-emerald-600 rounded-full flex-shrink-0">
+                                                <CheckCircle2 className="w-5 h-5" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-xs text-gray-500 mb-0.5">タスクを完了しました</div>
+                                                <div className="text-sm font-bold text-gray-900 truncate">{taskTitle}</div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {post.image_url && (
+                                        <div className="mt-3 rounded-xl overflow-hidden border border-gray-200">
+                                            <img src={post.image_url} alt="post" className="w-full h-auto object-cover max-h-96" />
+                                        </div>
+                                    )}
+
+                                    <div className="flex items-center justify-between mt-3 max-w-xs pr-4">
                                         <button
-                                            className="text-gray-400 hover:text-sky-500 rounded-full p-1 hover:bg-sky-50 transition-colors"
+                                            className="group flex items-center gap-1.5 text-gray-500 hover:text-sky-500 transition-colors"
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                setOpenMenuPostId(openMenuPostId === post.id ? null : post.id);
+                                                handlePostClick(post);
                                             }}
                                         >
-                                            <MoreHorizontal className="w-4 h-4" />
+                                            <div className="p-2 rounded-full group-hover:bg-sky-50">
+                                                <MessageCircle className="w-4.5 h-4.5" />
+                                            </div>
+                                            <span className="text-xs group-hover:text-sky-500">{post.comment_count > 0 && post.comment_count}</span>
                                         </button>
 
-                                        {openMenuPostId === post.id && post.user_id === myProfile?.id && (
-                                            <div className="absolute right-0 top-full bg-white shadow-lg border border-gray-100 rounded-lg z-10 w-24 overflow-hidden">
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); deletePost(post.id); }}
-                                                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-xs text-red-500 hover:bg-red-50"
-                                                >
-                                                    <Trash2 className="w-3 h-3" />
-                                                    削除
-                                                </button>
+                                        <button
+                                            onClick={(e) => toggleLike(post.id, e)}
+                                            className={`group flex items-center gap-1.5 transition-colors ${post.has_liked ? 'text-pink-600' : 'text-gray-500 hover:text-pink-600'
+                                                }`}
+                                        >
+                                            <div className={`p-2 rounded-full group-hover:bg-pink-50`}>
+                                                <Heart className={`w-4.5 h-4.5 ${post.has_liked ? 'fill-current' : ''}`} />
                                             </div>
-                                        )}
+                                            <span className="text-xs">{post.like_count > 0 && post.like_count}</span>
+                                        </button>
+
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); handleShare(post.id); }}
+                                            className="group flex items-center gap-1.5 text-gray-500 hover:text-green-500 transition-colors"
+                                        >
+                                            <div className="p-2 rounded-full group-hover:bg-green-50">
+                                                <Share2 className="w-4.5 h-4.5" />
+                                            </div>
+                                        </button>
                                     </div>
-                                </div>
-
-                                <p className="mt-1 text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">{post.content}</p>
-
-                                {post.tasks && (
-                                    <div className="mt-2 border border-gray-200 rounded-xl p-3 bg-white flex items-start gap-3 hover:bg-gray-50 transition-colors">
-                                        <div className="p-2 bg-emerald-100 text-emerald-600 rounded-full flex-shrink-0">
-                                            <CheckCircle2 className="w-5 h-5" />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="text-xs text-gray-500 mb-0.5">タスクを完了しました</div>
-                                            <div className="text-sm font-bold text-gray-900 truncate">{post.tasks.title}</div>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {post.image_url && (
-                                    <div className="mt-3 rounded-xl overflow-hidden border border-gray-200">
-                                        <img src={post.image_url} alt="post" className="w-full h-auto object-cover max-h-96" />
-                                    </div>
-                                )}
-
-                                <div className="flex items-center justify-between mt-3 max-w-xs pr-4">
-                                    <button
-                                        className="group flex items-center gap-1.5 text-gray-500 hover:text-sky-500 transition-colors"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            handlePostClick(post);
-                                        }}
-                                    >
-                                        <div className="p-2 rounded-full group-hover:bg-sky-50">
-                                            <MessageCircle className="w-4.5 h-4.5" />
-                                        </div>
-                                        <span className="text-xs group-hover:text-sky-500">{post.comment_count > 0 && post.comment_count}</span>
-                                    </button>
-
-                                    <button
-                                        onClick={(e) => toggleLike(post.id, e)}
-                                        className={`group flex items-center gap-1.5 transition-colors ${post.has_liked ? 'text-pink-600' : 'text-gray-500 hover:text-pink-600'
-                                            }`}
-                                    >
-                                        <div className={`p-2 rounded-full group-hover:bg-pink-50`}>
-                                            <Heart className={`w-4.5 h-4.5 ${post.has_liked ? 'fill-current' : ''}`} />
-                                        </div>
-                                        <span className="text-xs">{post.like_count > 0 && post.like_count}</span>
-                                    </button>
-
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); handleShare(post.id); }}
-                                        className="group flex items-center gap-1.5 text-gray-500 hover:text-green-500 transition-colors"
-                                    >
-                                        <div className="p-2 rounded-full group-hover:bg-green-50">
-                                            <Share2 className="w-4.5 h-4.5" />
-                                        </div>
-                                    </button>
                                 </div>
                             </div>
-                        </div>
-                    </article>
-                ))}
+                        </article>
+                    );
+                })}
 
                 {displayedPosts.length === 0 && (
                     <div className="text-center py-20 text-gray-400 text-sm">
@@ -561,7 +589,7 @@ export default function HomePage() {
                                     <textarea
                                         value={newPostContent}
                                         onChange={(e) => setNewPostContent(e.target.value)}
-                                        placeholder={selectedTask ? "達成の感想を一言！" : "いまどうしてる？"}
+                                        placeholder={selectedTask ? "達成の感想を一言！(任意)" : "いまどうしてる？"}
                                         className="w-full text-lg resize-none focus:outline-none placeholder-gray-400 min-h-[80px] flex-shrink-0"
                                     />
 
@@ -636,14 +664,17 @@ export default function HomePage() {
                                 </div>
                                 <p className="text-lg text-gray-900 whitespace-pre-wrap mb-4">{selectedPost.content}</p>
 
-                                {selectedPost.tasks && (
+                                {/* ▼▼▼ 変更: 詳細画面でもスナップショット優先で表示 ▼▼▼ */}
+                                {(selectedPost.task_snapshot?.title || selectedPost.tasks?.title) && (
                                     <div className="mb-6 border border-emerald-100 bg-emerald-50/50 rounded-xl p-4 flex items-center gap-3">
                                         <div className="p-2 bg-emerald-100 text-emerald-600 rounded-full">
                                             <CheckCircle2 className="w-6 h-6" />
                                         </div>
                                         <div>
                                             <div className="text-xs text-emerald-600 font-bold mb-0.5">MISSION COMPLETE</div>
-                                            <div className="text-base font-bold text-gray-900">{selectedPost.tasks.title}</div>
+                                            <div className="text-base font-bold text-gray-900">
+                                                {selectedPost.task_snapshot?.title || selectedPost.tasks?.title}
+                                            </div>
                                         </div>
                                     </div>
                                 )}
@@ -657,7 +688,7 @@ export default function HomePage() {
                                             <div className="bg-gray-50 p-3 rounded-2xl rounded-tl-none flex-1">
                                                 <div className="flex justify-between items-baseline mb-1">
                                                     <span className="font-bold text-xs">{comment.profiles?.name}</span>
-                                                    <span className="text-10px text-gray-400">{getRelativeTime(comment.created_at)}</span>
+                                                    <span className="text-[10px] text-gray-400">{getRelativeTime(comment.created_at)}</span>
                                                 </div>
                                                 <p className="text-sm text-gray-800 whitespace-pre-wrap">{comment.content}</p>
                                             </div>
