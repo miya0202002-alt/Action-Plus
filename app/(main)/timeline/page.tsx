@@ -281,6 +281,7 @@ export default function HomePage() {
             // 通知
             if (targetPost.user_id !== myProfile.id) {
                 const { error: notifError } = await supabase.from('notifications').insert({
+                    id: crypto.randomUUID(), // IDを明示的に付与
                     user_id: targetPost.user_id,
                     actor_id: myProfile.id,
                     type: 'like',
@@ -336,6 +337,7 @@ export default function HomePage() {
 
             if (selectedPost.user_id !== myProfile.id) {
                 await supabase.from('notifications').insert({
+                    id: crypto.randomUUID(), // IDを明示的に付与
                     user_id: selectedPost.user_id,
                     actor_id: myProfile.id,
                     type: 'comment',
@@ -390,6 +392,7 @@ export default function HomePage() {
                 const notifTitle = selectedTask ? selectedTask.title : '新規投稿';
 
                 const notificationsToInsert = followers.map(f => ({
+                    id: crypto.randomUUID(), // IDを明示的に付与
                     user_id: f.follower_id,
                     actor_id: myProfile.id,
                     type: notifType,

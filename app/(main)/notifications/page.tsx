@@ -97,6 +97,7 @@ export default function NotificationsPage() {
 
                 if (!existing || existing.length === 0) {
                     await supabase.from('notifications').insert({
+                        id: crypto.randomUUID(), // IDを明示的に付与
                         user_id: userId,
                         type: type,
                         title: task.title,
@@ -119,7 +120,7 @@ export default function NotificationsPage() {
             .limit(50);
 
         if (error) {
-            console.error("通知取得エラー:", error);
+            console.error("通知取得エラー詳細:", JSON.stringify(error, null, 2));
             setIsLoading(false);
             return;
         }
