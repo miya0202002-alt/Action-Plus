@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Heart, MessageCircle, Share2, MoreHorizontal, Image as ImageIcon, Send, CheckCircle2, X as XIcon, Plus, Trash2, Copy } from 'lucide-react';
+import { Heart, MessageCircle, Share2, MoreHorizontal, Image as ImageIcon, Send, CheckCircle2, X as XIcon, Plus, Trash2, Trophy } from 'lucide-react';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabaseClient';
-import { useUser } from '@clerk/nextjs';
+import { useUser, useAuth } from '@clerk/nextjs';
+import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 
 // --- 時間を「○分前」形式にする関数 ---
 const getRelativeTime = (dateString: string) => {
@@ -39,27 +39,30 @@ type Comment = {
     profiles?: Profile;
 };
 
+type Task = {
+    id: number;
+    title: string;
+    // 必要に応じて created_at などを追加
+};
+
 type Post = {
     id: number;
     user_id: string;
     content: string;
     image_url?: string;
-    linked_task?: string;
     created_at: string;
     profiles: Profile | null;
     like_count: number;
     comment_count: number;
     has_liked: boolean;
-};
-
-type Task = {
-    id: number;
-    title: string;
+    task_id?: number;
+    tasks?: Task | null; // Joinしたタスク情報
 };
 
 export default function HomePage() {
     // --- 状態管理 ---
     const { user, isLoaded } = useUser();
+    const { getToken } = useAuth();
     const [posts, setPosts] = useState<Post[]>([]);
     const [myProfile, setMyProfile] = useState<Profile | null>(null);
     const [myTasks, setMyTasks] = useState<Task[]>([]);
@@ -72,7 +75,9 @@ export default function HomePage() {
 
     const [isPostModalOpen, setIsPostModalOpen] = useState(false);
     const [newPostContent, setNewPostContent] = useState("");
-    const [selectedTask, setSelectedTask] = useState<string | null>(null);
+
+    const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isPosting, setIsPosting] = useState(false);
@@ -109,6 +114,7 @@ export default function HomePage() {
 
     const fetchData = async (userId: string) => {
         setIsLoading(true);
+        const supabase = await createClerkSupabaseClient(getToken);
         // 1. プロフィール取得
         let { data: profileData } = await supabase
             .from('profiles')
@@ -149,7 +155,7 @@ export default function HomePage() {
         // 4. 投稿一覧取得
         const { data: postsData, error: postsError } = await supabase
             .from('posts')
-            .select('*, profiles(id, name, avatar_url, goal)')
+            .select('*, profiles(id, name, avatar_url, goal), tasks(id, title)')
             .order('created_at', { ascending: false });
 
         if (postsError) console.error('投稿取得エラー:', postsError);
@@ -184,7 +190,11 @@ export default function HomePage() {
                 .from('tasks')
                 .select('*')
                 .eq('user_id', user.id)
-                .eq('is_completed', true);
+                .eq('is_completed', true)
+                // ▼▼▼ 修正箇所: updated_at を created_at に変更 ▼▼▼
+                .order('created_at', { ascending: false })
+                .limit(20);
+
             if (tasksData) setMyTasks(tasksData);
         }
         setIsLoading(false);
@@ -193,6 +203,7 @@ export default function HomePage() {
     const deletePost = async (postId: number) => {
         if (!confirm("本当にこの投稿を削除しますか？")) return;
         setPosts(posts.filter(p => p.id !== postId));
+        const supabase = await createClerkSupabaseClient(getToken);
         const { error } = await supabase.from('posts').delete().eq('id', postId);
         if (error) alert("削除に失敗しました");
         setOpenMenuPostId(null);
@@ -205,11 +216,12 @@ export default function HomePage() {
         });
     };
 
-    // --- いいね機能 (通知機能追加済み) ---
+    // --- いいね機能 ---
     const toggleLike = async (postId: number, e: React.MouseEvent) => {
         e.stopPropagation();
         if (!myProfile) return;
 
+        const supabase = await createClerkSupabaseClient(getToken);
         const targetPost = posts.find(p => p.id === postId);
         if (!targetPost) return;
 
@@ -236,15 +248,14 @@ export default function HomePage() {
                 .from('likes')
                 .insert({ user_id: myProfile.id, post_id: postId });
 
-            // ▼▼▼ 追加: いいね通知を送信 ▼▼▼
-            // 自分自身の投稿へのいいねでなければ通知を送る
+            // 通知
             if (targetPost.user_id !== myProfile.id) {
                 await supabase.from('notifications').insert({
-                    user_id: targetPost.user_id, // 投稿主へ
-                    actor_id: myProfile.id,      // 自分から
+                    user_id: targetPost.user_id,
+                    actor_id: myProfile.id,
                     type: 'like',
-                    content: targetPost.content, // どの投稿か分かるように本文を入れる
-                    link_id: String(postId),     // リンク先
+                    content: targetPost.content || "画像投稿",
+                    link_id: String(postId),
                     is_read: false
                 });
             }
@@ -254,6 +265,7 @@ export default function HomePage() {
     // --- 詳細表示 ---
     const handlePostClick = async (post: Post) => {
         setSelectedPost(post);
+        const supabase = await createClerkSupabaseClient(getToken);
         const { data } = await supabase
             .from('comments')
             .select(`*, profiles(name, avatar_url)`)
@@ -263,11 +275,12 @@ export default function HomePage() {
         if (data) setComments(data as any);
     };
 
-    // --- コメント送信 (通知機能追加済み) ---
+    // --- コメント送信 ---
     const handleCommentSubmit = async () => {
         if (!newComment.trim() || !selectedPost || !myProfile) return;
         setIsSendingComment(true);
 
+        const supabase = await createClerkSupabaseClient(getToken);
         const { data, error } = await supabase
             .from('comments')
             .insert({
@@ -285,13 +298,12 @@ export default function HomePage() {
                 p.id === selectedPost.id ? { ...p, comment_count: p.comment_count + 1 } : p
             ));
 
-            // ▼▼▼ 追加: コメント通知を送信 ▼▼▼
             if (selectedPost.user_id !== myProfile.id) {
                 await supabase.from('notifications').insert({
-                    user_id: selectedPost.user_id, // 投稿主へ
-                    actor_id: myProfile.id,        // 自分から
+                    user_id: selectedPost.user_id,
+                    actor_id: myProfile.id,
                     type: 'comment',
-                    content: newComment,           // コメント内容
+                    content: newComment,
                     link_id: String(selectedPost.id),
                     is_read: false
                 });
@@ -300,19 +312,20 @@ export default function HomePage() {
         setIsSendingComment(false);
     };
 
-    // --- 投稿送信 (通知機能追加済み) ---
+    // --- 投稿送信 ---
     const handlePostSubmit = async () => {
-        if (!newPostContent && !selectedTask) return;
+        if (!newPostContent.trim() && !selectedTask) return;
         if (!myProfile) return;
 
         setIsPosting(true);
+        const supabase = await createClerkSupabaseClient(getToken);
 
         // 1. 投稿を作成
         const { data: newPost, error } = await supabase.from('posts').insert({
             user_id: myProfile.id,
             content: newPostContent,
-            linked_task: selectedTask,
-        }).select().single(); // IDを取得するためにselectを追加
+            task_id: selectedTask ? selectedTask.id : null,
+        }).select().single();
 
         if (error) {
             alert("投稿に失敗しました: " + error.message);
@@ -323,30 +336,26 @@ export default function HomePage() {
             setIsPostModalOpen(false);
             fetchData(myProfile.id);
 
-            // ▼▼▼ 追加: フォロワーへ通知を一斉送信 ▼▼▼
-            // 1. 自分のフォロワーを取得
+            // 通知
             const { data: followers } = await supabase
                 .from('follows')
                 .select('follower_id')
                 .eq('following_id', myProfile.id);
 
             if (followers && followers.length > 0) {
-                // 2. 通知の種類を決定 (タスク完了 or 通常投稿)
                 const notifType = selectedTask ? 'followed_task_complete' : 'followed_post';
-                const notifTitle = selectedTask ? selectedTask : '新規投稿'; // タスク名またはタイトル
+                const notifTitle = selectedTask ? selectedTask.title : '新規投稿';
 
-                // 3. 通知データを作成 (フォロワー全員分)
                 const notificationsToInsert = followers.map(f => ({
-                    user_id: f.follower_id,       // フォロワーへ
-                    actor_id: myProfile.id,       // 自分から
+                    user_id: f.follower_id,
+                    actor_id: myProfile.id,
                     type: notifType,
-                    title: notifTitle,            // タスク名など
-                    content: newPostContent,      // 投稿本文
-                    link_id: String(newPost.id),  // 投稿ID
+                    title: notifTitle,
+                    content: newPostContent || "タスクを完了しました！",
+                    link_id: String(newPost.id),
                     is_read: false
                 }));
 
-                // 4. 一括挿入
                 await supabase.from('notifications').insert(notificationsToInsert);
             }
         }
@@ -459,14 +468,19 @@ export default function HomePage() {
                                     </div>
                                 </div>
 
-                                {post.linked_task && (
-                                    <div className="mt-1 inline-flex items-center gap-1 text-emerald-600 text-xs font-bold">
-                                        <CheckCircle2 className="w-3 h-3" />
-                                        <span>{post.linked_task}</span>
+                                <p className="mt-1 text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">{post.content}</p>
+
+                                {post.tasks && (
+                                    <div className="mt-2 border border-gray-200 rounded-xl p-3 bg-white flex items-start gap-3 hover:bg-gray-50 transition-colors">
+                                        <div className="p-2 bg-emerald-100 text-emerald-600 rounded-full flex-shrink-0">
+                                            <CheckCircle2 className="w-5 h-5" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-xs text-gray-500 mb-0.5">タスクを完了しました</div>
+                                            <div className="text-sm font-bold text-gray-900 truncate">{post.tasks.title}</div>
+                                        </div>
                                     </div>
                                 )}
-
-                                <p className="mt-1 text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">{post.content}</p>
 
                                 {post.image_url && (
                                     <div className="mt-3 rounded-xl overflow-hidden border border-gray-200">
@@ -532,32 +546,68 @@ export default function HomePage() {
             {
                 isPostModalOpen && (
                     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-start justify-center pt-12 px-4 animate-in fade-in duration-200">
-                        <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden">
-                            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                        <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col">
+                            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
                                 <button onClick={() => setIsPostModalOpen(false)} className="text-gray-900 font-medium">キャンセル</button>
-                                <button onClick={handlePostSubmit} disabled={!newPostContent && !selectedTask} className="bg-sky-500 text-white px-4 py-1.5 rounded-full text-sm font-bold disabled:opacity-50">投稿する</button>
+                                <button onClick={handlePostSubmit} disabled={!newPostContent.trim() && !selectedTask} className="bg-sky-500 text-white px-4 py-1.5 rounded-full text-sm font-bold disabled:opacity-50">投稿する</button>
                             </div>
-                            <div className="p-4 flex gap-3">
+
+                            <div className="p-4 flex gap-3 flex-1 overflow-hidden">
                                 <div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden flex-shrink-0">
                                     {myProfile?.avatar_url && <img src={myProfile.avatar_url} alt="Me" className="w-full h-full object-cover" />}
                                 </div>
-                                <div className="flex-1">
+
+                                <div className="flex-1 flex flex-col min-h-0">
                                     <textarea
                                         value={newPostContent}
                                         onChange={(e) => setNewPostContent(e.target.value)}
-                                        placeholder="いまどうしてる？"
-                                        className="w-full text-lg resize-none focus:outline-none placeholder-gray-400 min-h-[120px]"
+                                        placeholder={selectedTask ? "達成の感想を一言！" : "いまどうしてる？"}
+                                        className="w-full text-lg resize-none focus:outline-none placeholder-gray-400 min-h-[80px] flex-shrink-0"
                                     />
+
                                     {selectedTask && (
-                                        <div className="mb-2 flex items-center gap-2 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-bold">
-                                            <CheckCircle2 className="w-4 h-4" /> 完了: {selectedTask}
-                                            <button onClick={() => setSelectedTask(null)}><XIcon className="w-4 h-4 ml-2" /></button>
+                                        <div className="mb-4">
+                                            <div className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-bold border border-emerald-100">
+                                                <CheckCircle2 className="w-4 h-4" />
+                                                <span className="truncate max-w-[200px]">{selectedTask.title}</span>
+                                                <button onClick={() => setSelectedTask(null)} className="hover:bg-emerald-100 rounded-full p-0.5"><XIcon className="w-4 h-4" /></button>
+                                            </div>
                                         </div>
                                     )}
-                                    <div className="flex gap-4 pt-2 border-t border-gray-100">
+
+                                    <div className="flex gap-4 pt-2 border-t border-gray-100 mb-2 flex-shrink-0">
                                         <button onClick={() => fileInputRef.current?.click()} className="text-sky-500"><ImageIcon /></button>
                                         <input type="file" ref={fileInputRef} onChange={(e) => { if (e.target.files?.[0]) setSelectedImage(URL.createObjectURL(e.target.files[0])) }} className="hidden" />
-                                        <button className="text-emerald-500"><CheckCircle2 /></button>
+                                    </div>
+
+                                    <div className="flex-1 overflow-y-auto min-h-0 pt-2">
+                                        <p className="text-xs font-bold text-gray-400 mb-2">最近完了したタスク</p>
+                                        {myTasks.length > 0 ? (
+                                            <div className="space-y-2">
+                                                {myTasks.map(task => (
+                                                    <button
+                                                        key={task.id}
+                                                        onClick={() => setSelectedTask(task)}
+                                                        disabled={selectedTask?.id === task.id}
+                                                        className={`w-full text-left p-2.5 rounded-xl border transition-all flex items-center gap-3 ${selectedTask?.id === task.id
+                                                            ? 'bg-emerald-50 border-emerald-200 opacity-50 cursor-default'
+                                                            : 'bg-white border-gray-100 hover:bg-gray-50 hover:border-gray-200'
+                                                            }`}
+                                                    >
+                                                        <div className={`p-1.5 rounded-full ${selectedTask?.id === task.id ? 'bg-emerald-200 text-emerald-700' : 'bg-gray-100 text-gray-400'}`}>
+                                                            {selectedTask?.id === task.id ? <CheckCircle2 className="w-4 h-4" /> : <Trophy className="w-4 h-4" />}
+                                                        </div>
+                                                        <span className={`text-sm truncate font-medium ${selectedTask?.id === task.id ? 'text-emerald-800' : 'text-gray-700'}`}>
+                                                            {task.title}
+                                                        </span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="text-center py-4 text-gray-400 text-xs bg-gray-50 rounded-lg">
+                                                完了したタスクはありません
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -571,7 +621,7 @@ export default function HomePage() {
                 selectedPost && (
                     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setSelectedPost(null)}>
                         <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-                            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+                            <div className="p-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
                                 <h3 className="font-bold">投稿</h3>
                                 <button onClick={() => setSelectedPost(null)}><XIcon className="w-6 h-6 text-gray-500" /></button>
                             </div>
@@ -586,6 +636,18 @@ export default function HomePage() {
                                 </div>
                                 <p className="text-lg text-gray-900 whitespace-pre-wrap mb-4">{selectedPost.content}</p>
 
+                                {selectedPost.tasks && (
+                                    <div className="mb-6 border border-emerald-100 bg-emerald-50/50 rounded-xl p-4 flex items-center gap-3">
+                                        <div className="p-2 bg-emerald-100 text-emerald-600 rounded-full">
+                                            <CheckCircle2 className="w-6 h-6" />
+                                        </div>
+                                        <div>
+                                            <div className="text-xs text-emerald-600 font-bold mb-0.5">MISSION COMPLETE</div>
+                                            <div className="text-base font-bold text-gray-900">{selectedPost.tasks.title}</div>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <hr className="border-gray-100 my-4" />
 
                                 <div className="space-y-4">
@@ -595,7 +657,7 @@ export default function HomePage() {
                                             <div className="bg-gray-50 p-3 rounded-2xl rounded-tl-none flex-1">
                                                 <div className="flex justify-between items-baseline mb-1">
                                                     <span className="font-bold text-xs">{comment.profiles?.name}</span>
-                                                    <span className="text-[10px] text-gray-400">{getRelativeTime(comment.created_at)}</span>
+                                                    <span className="text-10px text-gray-400">{getRelativeTime(comment.created_at)}</span>
                                                 </div>
                                                 <p className="text-sm text-gray-800 whitespace-pre-wrap">{comment.content}</p>
                                             </div>
@@ -605,7 +667,7 @@ export default function HomePage() {
                                 </div>
                             </div>
 
-                            <div className="p-3 border-t border-gray-100 bg-white flex gap-2 items-center">
+                            <div className="p-3 border-t border-gray-100 bg-white flex gap-2 items-center flex-shrink-0">
                                 <img src={myProfile?.avatar_url} className="w-8 h-8 rounded-full bg-gray-200" />
                                 <input
                                     type="text"
