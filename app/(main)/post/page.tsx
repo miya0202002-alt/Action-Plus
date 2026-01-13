@@ -33,13 +33,39 @@ export default function PostDetailPage() {
                 *,
                 profiles ( name, avatar_url )
             `)
-            .eq('id', id) // URLのIDと一致する投稿を探す
+            .eq('id', id)
             .single();
 
         if (error) {
-            console.error("投稿取得エラー:", error);
-        } else {
-            setPost(data);
+            console.error("【デバッグ】投稿取得エラー:", error);
+        } else if (data) {
+            // いいね数を取得
+            const { count: likeCount, error: countError } = await supabase
+                .from('likes')
+                .select('*', { count: 'exact', head: true })
+                .eq('post_id', id);
+
+            if (countError) console.error("【デバッグ】いいね数取得エラー:", countError);
+
+            // 自分がいいねしているか確認
+            let hasLiked = false;
+            if (user) {
+                const { data: likeData } = await supabase
+                    .from('likes')
+                    .select('*')
+                    .eq('post_id', id)
+                    .eq('user_id', user.id)
+                    .single();
+                hasLiked = !!likeData;
+            }
+
+            console.log("【デバッグ】投稿詳細取得:", {
+                postId: id,
+                likeCount: likeCount,
+                hasLiked: hasLiked
+            });
+
+            setPost({ ...data, likeCount, hasLiked });
         }
         setLoading(false);
     };
@@ -87,8 +113,8 @@ export default function PostDetailPage() {
 
                 <div className="flex items-center gap-6 pt-2 border-t border-gray-50">
                     <div className="flex items-center gap-2 text-gray-500">
-                        <Heart className={`w-5 h-5 ${post.likes > 0 ? 'fill-pink-500 text-pink-500' : ''}`} />
-                        <span>いいね！</span>
+                        <Heart className={`w-5 h-5 ${post.hasLiked ? 'fill-pink-500 text-pink-500' : ''}`} />
+                        <span>{post.likeCount || 0} いいね！</span>
                     </div>
                     {/* コメント機能などは必要に応じて追加 */}
                 </div>

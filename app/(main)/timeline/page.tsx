@@ -234,6 +234,12 @@ export default function HomePage() {
         // ▼▼▼ 変更: 認証付きクライアントを作成 ▼▼▼
         const supabase = await createClerkSupabaseClient(getToken);
 
+        // --- デバッグログ開始 ---
+        console.log("--- 【デバッグ】いいね処理開始 ---");
+        console.log("Post ID:", postId);
+        console.log("User ID:", myProfile.id);
+        // --- デバッグログ終了 ---
+
         const targetPost = posts.find(p => p.id === postId);
         if (!targetPost) return;
 
@@ -249,20 +255,32 @@ export default function HomePage() {
 
         // DB更新
         if (isLiked) {
-            await supabase
+            const { error: deleteError } = await supabase
                 .from('likes')
                 .delete()
                 .eq('user_id', myProfile.id)
                 .eq('post_id', postId);
+
+            if (deleteError) {
+                console.error("【デバッグ】いいね削除エラー:", deleteError);
+            } else {
+                console.log("【デバッグ】いいね削除成功");
+            }
         } else {
             // いいね追加
-            await supabase
+            const { error: insertError } = await supabase
                 .from('likes')
                 .insert({ user_id: myProfile.id, post_id: postId });
 
+            if (insertError) {
+                console.error("【デバッグ】いいね追加エラー:", insertError);
+            } else {
+                console.log("【デバッグ】いいね追加成功");
+            }
+
             // 通知
             if (targetPost.user_id !== myProfile.id) {
-                await supabase.from('notifications').insert({
+                const { error: notifError } = await supabase.from('notifications').insert({
                     user_id: targetPost.user_id,
                     actor_id: myProfile.id,
                     type: 'like',
@@ -270,8 +288,10 @@ export default function HomePage() {
                     link_id: String(postId),
                     is_read: false
                 });
+                if (notifError) console.error("【デバッグ】通知作成エラー:", notifError);
             }
         }
+        console.log("--- 【デバッグ】いいね処理終了 ---");
     };
 
     // --- 詳細表示 ---
