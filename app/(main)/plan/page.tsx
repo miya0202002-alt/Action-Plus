@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Loader2, Sparkles, Network, Calendar, Clock, Target, CheckCircle2, AlertCircle, Save, History, FileText, X, ChevronRight } from "lucide-react";
+import { Loader2, Sparkles, Network, Calendar, Clock, CheckCircle2, AlertCircle, Save, History, FileText, X, ChevronRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 import { useUser, useAuth } from '@clerk/nextjs';
@@ -49,7 +49,6 @@ export default function PlanPage() {
       try {
         const parsed = JSON.parse(savedDraft);
         const now = new Date().getTime();
-        // 30分 (30 * 60 * 1000 ms) 以内なら復元
         if (now - parsed.timestamp < 30 * 60 * 1000) {
           setGoal(parsed.goal || "");
           setTargetDate(parsed.targetDate || "");
@@ -65,7 +64,6 @@ export default function PlanPage() {
     }
   }, []);
 
-  // 入力が変わるたびに保存
   useEffect(() => {
     if (goal || targetDate || currentLevel) {
       const data = {
@@ -76,36 +74,22 @@ export default function PlanPage() {
     }
   }, [goal, targetDate, currentLevel, weekdayTime, weekendTime]);
 
-  // --- 履歴の取得 & 古いログの自動削除 ---
+  // --- 履歴の取得 & クリーンアップ ---
   const fetchAndCleanupLogs = async () => {
     if (!user) return;
     try {
       const supabase = await createClerkSupabaseClient(getToken);
-
-      // 1. 30分以上前のログをデータベースから削除
       const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-      const { error: deleteError } = await supabase
-        .from('ai_logs')
-        .delete()
-        .eq('user_id', user.id)
-        .lt('created_at', thirtyMinsAgo);
 
-      if (deleteError) {
-        console.error("古いログの削除に失敗:", deleteError);
-      }
+      await supabase.from('ai_logs').delete().eq('user_id', user.id).lt('created_at', thirtyMinsAgo);
 
-      // 2. 最新のログを取得
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('ai_logs')
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error("履歴取得エラー:", error);
-      } else if (data) {
-        setLogs(data);
-      }
+      if (data) setLogs(data);
     } catch (err) {
       console.error("システムエラー:", err);
     }
@@ -143,7 +127,6 @@ export default function PlanPage() {
 
       setRoadmap(sortedRoadmap);
 
-      // AIログ保存
       if (user) {
         const supabase = await createClerkSupabaseClient(getToken);
         const { error: logError } = await supabase.from('ai_logs').insert({
@@ -151,10 +134,7 @@ export default function PlanPage() {
           goal_input: goal,
           ai_response: { roadmap: sortedRoadmap }
         });
-
-        if (logError) {
-          console.error("ログ保存エラー:", logError);
-        } else {
+        if (!logError) {
           fetchAndCleanupLogs();
           localStorage.removeItem("plan_draft_data");
         }
@@ -162,47 +142,73 @@ export default function PlanPage() {
 
     } catch (error: any) {
       console.error("エラー:", error);
-      setErrorMsg("計画の作成に失敗しました。もう一度お試しください。");
+      setErrorMsg("計画の作成に失敗しました。");
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  // --- タスク保存 ---
-  const handleSaveAll = async () => {
-    if (!roadmap || !user) return;
-    if (!confirm("この計画をタスク一覧に追加しますか？")) return;
-
-    try {
-      const supabase = await createClerkSupabaseClient(getToken);
-      const tasksToInsert = roadmap.map(task => ({
-        user_id: user.id,
-        title: task.title,
-        due_date: new Date(task.deadline).toISOString(),
-        goal_input: goal,
-        is_completed: false
-      }));
-
-      const { error } = await supabase.from('tasks').insert(tasksToInsert);
-
-      if (error) {
-        console.error("タスク保存エラー詳細:", JSON.stringify(error, null, 2));
-        alert(`保存に失敗しました。\nメッセージ: ${error.message}\n詳細: ${error.details || 'なし'}\nヒント: ${error.hint || 'なし'}`);
-      } else {
-        alert("タスクを保存しました！タスクページで確認できます。");
-        router.push("/tasks");
-      }
-    } catch (err) {
-      console.error(err);
-      alert("予期せぬエラーが発生しました");
     }
   };
 
   const handleTaskChange = (index: number, field: keyof TaskItem, value: string) => {
     if (!roadmap) return;
     const newRoadmap = [...roadmap];
-    newRoadmap[index] = { ...newRoadmap[index], [field]: value };
+    (newRoadmap[index] as any)[field] = value;
     setRoadmap(newRoadmap);
+  };
+
+  // --- 保存処理 ---
+  const handleSaveAll = async () => {
+    if (!user) {
+      alert("ログインしてください");
+      return;
+    }
+    if (!roadmap || roadmap.length === 0) {
+      alert("保存する計画がありません");
+      return;
+    }
+
+    try {
+      const supabase = await createClerkSupabaseClient(getToken);
+
+      // 1. プロフィールの目標(goal)を更新
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ goal: goal })
+        .eq('id', user.id);
+
+      if (profileError) {
+        console.warn("Profile Update Warning:", profileError);
+      }
+
+      // 2. tasksテーブルにタスクを一括保存
+      const tasksToInsert = roadmap.map((task) => ({
+        user_id: user.id,
+        title: task.title,
+        description: task.description,
+        deadline: new Date(task.deadline).toISOString(),
+        is_completed: false,
+        estimated_hours: task.estimatedHours,
+        priority: task.priority,
+        // 新しく作ったカラム goal_title に目標を入れる
+        goal_title: goal
+      }));
+
+      const { error: tasksError } = await supabase
+        .from('tasks')
+        .insert(tasksToInsert);
+
+      if (tasksError) {
+        console.error("Tasks Save Error:", tasksError);
+        throw new Error(`タスクの保存に失敗: ${tasksError.message}`);
+      }
+
+      alert("タスクシートに追加しました！");
+      // ★ここを変更しました：tasksページへ移動
+      router.push('/tasks');
+
+    } catch (error: any) {
+      console.error("保存処理全体の失敗:", error);
+      alert(`エラーが発生しました: ${error.message}`);
+    }
   };
 
   const getBorderColor = (priority: string) => {
@@ -269,10 +275,7 @@ export default function PlanPage() {
                   ))}
                   <div
                     className="absolute top-1 bottom-1 bg-sky-500 rounded-full transition-all duration-300 shadow-sm"
-                    style={{
-                      left: `${weekdayTime * 33.3}%`,
-                      width: '33.3%'
-                    }}
+                    style={{ left: `${weekdayTime * 33.3}%`, width: '33.3%' }}
                   />
                 </div>
               </div>
@@ -291,10 +294,7 @@ export default function PlanPage() {
                   ))}
                   <div
                     className="absolute top-1 bottom-1 bg-green-500 rounded-full transition-all duration-300 shadow-sm"
-                    style={{
-                      left: `${weekendTime * 33.3}%`,
-                      width: '33.3%'
-                    }}
+                    style={{ left: `${weekendTime * 33.3}%`, width: '33.3%' }}
                   />
                 </div>
               </div>
@@ -307,7 +307,6 @@ export default function PlanPage() {
             </button>
           </div>
 
-          {/* 履歴リスト */}
           {logs.length > 0 && (
             <div className="pt-8 border-t border-gray-100">
               <h3 className="text-sm font-bold text-gray-500 mb-4 flex items-center gap-2"><History className="w-4 h-4" /> 最近の履歴 (30分以内)</h3>
@@ -326,7 +325,6 @@ export default function PlanPage() {
           )}
         </div>
 
-        {/* 詳細モーダル (文字で見やすく表示) */}
         {selectedLog && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-6 max-h-[80vh] flex flex-col overflow-hidden">
@@ -400,7 +398,7 @@ export default function PlanPage() {
         </div>
 
         <button onClick={handleSaveAll} className="w-full bg-sky-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-sky-200 mt-6 flex items-center justify-center gap-2">
-          <CheckCircle2 className="w-5 h-5" /> 計画を確定して開始
+          <CheckCircle2 className="w-5 h-5" /> タスクシートに追加する
         </button>
       </div>
     </div>

@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Heart, MessageCircle, Share2, MoreHorizontal, Image as ImageIcon, Send, CheckCircle2, X as XIcon, Plus, Trash2, Trophy } from 'lucide-react';
+// ▼▼▼ 変更: Bell アイコンを追加 ▼▼▼
+import { Heart, MessageCircle, Share2, MoreHorizontal, Image as ImageIcon, Send, CheckCircle2, X as XIcon, Plus, Trash2, Trophy, Bell } from 'lucide-react';
 import Link from 'next/link';
-// ▼▼▼ 変更: 普通のsupabaseではなく、Clerk連携用の関数をインポート ▼▼▼
 import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 import { useUser, useAuth } from '@clerk/nextjs';
 
@@ -63,10 +63,20 @@ type Post = {
     } | null;
 };
 
+// ▼▼▼ 追加: 通知の型定義 ▼▼▼
+type Notification = {
+    id: string;
+    type: string;
+    created_at: string;
+    is_read: boolean;
+    content: string;
+    link_id: string; // post_idが入る想定
+    actor: Profile; // 通知を送ったユーザー（結合用）
+};
+
 export default function HomePage() {
     // --- 状態管理 ---
     const { user, isLoaded } = useUser();
-    // ▼▼▼ 追加: トークン取得用のフック ▼▼▼
     const { getToken } = useAuth();
 
     const [posts, setPosts] = useState<Post[]>([]);
@@ -94,10 +104,17 @@ export default function HomePage() {
     const [isSendingComment, setIsSendingComment] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
 
+    // ▼▼▼ 追加: 通知関連の状態 ▼▼▼
+    const [notifications, setNotifications] = useState<Notification[]>([]);
+    const [unreadCount, setUnreadCount] = useState(0);
+    const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
+
+
     // --- 初期データ読み込み ---
     useEffect(() => {
         if (isLoaded && user) {
             fetchData(user.id);
+            fetchNotifications(user.id); // 通知も取得
         }
     }, [isLoaded, user]);
 
@@ -109,6 +126,7 @@ export default function HomePage() {
             if (currentScrollY > lastScrollY.current && currentScrollY > 50) {
                 setIsHeaderVisible(false);
                 setOpenMenuPostId(null);
+                setIsNotifDropdownOpen(false); // スクロールしたら通知メニューも閉じる
             } else {
                 setIsHeaderVisible(true);
             }
@@ -118,9 +136,95 @@ export default function HomePage() {
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
 
+    // --- 通知取得関数 ---
+    const fetchNotifications = async (userId: string) => {
+        const supabase = await createClerkSupabaseClient(getToken);
+
+        // actor_id を profiles と結合して取得
+        const { data, error } = await supabase
+            .from('notifications')
+            .select(`
+                *,
+                actor:profiles!actor_id(id, name, avatar_url)
+            `)
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+        if (data) {
+            setNotifications(data as any);
+            const unread = data.filter((n: any) => !n.is_read).length;
+            setUnreadCount(unread);
+        }
+    };
+
+    // --- 通知クリック時の処理 ---
+    const handleNotificationClick = async (notification: Notification) => {
+        setIsNotifDropdownOpen(false);
+        const supabase = await createClerkSupabaseClient(getToken);
+
+        // 1. 既読にする
+        if (!notification.is_read) {
+            await supabase
+                .from('notifications')
+                .update({ is_read: true })
+                .eq('id', notification.id);
+
+            // ローカルステート更新（既読に見せる）
+            setNotifications(prev => prev.map(n => n.id === notification.id ? { ...n, is_read: true } : n));
+            setUnreadCount(prev => Math.max(0, prev - 1));
+        }
+
+        // 2. 投稿データを取得してモーダルを開く
+        // 既存の posts 配列にあればそれを使う（高速化）
+        const existingPost = posts.find(p => String(p.id) === notification.link_id);
+        if (existingPost) {
+            handlePostClick(existingPost);
+            return;
+        }
+
+        // なければDBから詳細を取得（いいね状況なども含めて構築）
+        const { data: postData } = await supabase
+            .from('posts')
+            .select('*, profiles(id, name, avatar_url, goal), tasks(id, title)')
+            .eq('id', notification.link_id)
+            .single();
+
+        if (postData) {
+            // いいね数、コメント数、自分がいいねしたかを取得
+            const { count: likeCount } = await supabase
+                .from('likes')
+                .select('*', { count: 'exact', head: true })
+                .eq('post_id', postData.id);
+
+            const { count: commentCount } = await supabase
+                .from('comments')
+                .select('*', { count: 'exact', head: true })
+                .eq('post_id', postData.id);
+
+            const { data: myLike } = await supabase
+                .from('likes')
+                .select('id')
+                .eq('post_id', postData.id)
+                .eq('user_id', myProfile?.id)
+                .single();
+
+            const formattedPost: Post = {
+                ...postData,
+                like_count: likeCount || 0,
+                comment_count: commentCount || 0,
+                has_liked: !!myLike,
+            };
+
+            // 取得した投稿でモーダルを開く
+            handlePostClick(formattedPost);
+        } else {
+            alert("この投稿は削除された可能性があります。");
+        }
+    };
+
     const fetchData = async (userId: string) => {
         setIsLoading(true);
-        // ▼▼▼ 変更: 認証付きクライアントを作成 ▼▼▼
         const supabase = await createClerkSupabaseClient(getToken);
 
         // 1. プロフィール取得
@@ -210,7 +314,6 @@ export default function HomePage() {
     const deletePost = async (postId: number) => {
         if (!confirm("本当にこの投稿を削除しますか？")) return;
 
-        // ▼▼▼ 変更: 認証付きクライアントを作成 ▼▼▼
         const supabase = await createClerkSupabaseClient(getToken);
 
         setPosts(posts.filter(p => p.id !== postId));
@@ -231,14 +334,7 @@ export default function HomePage() {
         e.stopPropagation();
         if (!myProfile) return;
 
-        // ▼▼▼ 変更: 認証付きクライアントを作成 ▼▼▼
         const supabase = await createClerkSupabaseClient(getToken);
-
-        // --- デバッグログ開始 ---
-        console.log("--- 【デバッグ】いいね処理開始 ---");
-        console.log("Post ID:", postId);
-        console.log("User ID:", myProfile.id);
-        // --- デバッグログ終了 ---
 
         const targetPost = posts.find(p => p.id === postId);
         if (!targetPost) return;
@@ -255,33 +351,20 @@ export default function HomePage() {
 
         // DB更新
         if (isLiked) {
-            const { error: deleteError } = await supabase
+            await supabase
                 .from('likes')
                 .delete()
                 .eq('user_id', myProfile.id)
                 .eq('post_id', postId);
-
-            if (deleteError) {
-                console.error("【デバッグ】いいね削除エラー:", deleteError);
-            } else {
-                console.log("【デバッグ】いいね削除成功");
-            }
         } else {
-            // いいね追加
-            const { error: insertError } = await supabase
+            await supabase
                 .from('likes')
                 .insert({ user_id: myProfile.id, post_id: postId });
 
-            if (insertError) {
-                console.error("【デバッグ】いいね追加エラー:", insertError);
-            } else {
-                console.log("【デバッグ】いいね追加成功");
-            }
-
             // 通知
             if (targetPost.user_id !== myProfile.id) {
-                const { error: notifError } = await supabase.from('notifications').insert({
-                    id: crypto.randomUUID(), // IDを明示的に付与
+                await supabase.from('notifications').insert({
+                    id: crypto.randomUUID(),
                     user_id: targetPost.user_id,
                     actor_id: myProfile.id,
                     type: 'like',
@@ -289,16 +372,13 @@ export default function HomePage() {
                     link_id: String(postId),
                     is_read: false
                 });
-                if (notifError) console.error("【デバッグ】通知作成エラー:", notifError);
             }
         }
-        console.log("--- 【デバッグ】いいね処理終了 ---");
     };
 
     // --- 詳細表示 ---
     const handlePostClick = async (post: Post) => {
         setSelectedPost(post);
-        // ▼▼▼ 変更: 認証付きクライアントを作成 ▼▼▼
         const supabase = await createClerkSupabaseClient(getToken);
 
         const { data } = await supabase
@@ -315,7 +395,6 @@ export default function HomePage() {
         if (!newComment.trim() || !selectedPost || !myProfile) return;
         setIsSendingComment(true);
 
-        // ▼▼▼ 変更: 認証付きクライアントを作成 ▼▼▼
         const supabase = await createClerkSupabaseClient(getToken);
 
         const { data, error } = await supabase
@@ -337,7 +416,7 @@ export default function HomePage() {
 
             if (selectedPost.user_id !== myProfile.id) {
                 await supabase.from('notifications').insert({
-                    id: crypto.randomUUID(), // IDを明示的に付与
+                    id: crypto.randomUUID(),
                     user_id: selectedPost.user_id,
                     actor_id: myProfile.id,
                     type: 'comment',
@@ -350,13 +429,12 @@ export default function HomePage() {
         setIsSendingComment(false);
     };
 
-    // --- 投稿送信 (変更あり) ---
+    // --- 投稿送信 ---
     const handlePostSubmit = async () => {
         if (!newPostContent.trim() && !selectedTask) return;
         if (!myProfile) return;
 
         setIsPosting(true);
-        // ▼▼▼ 変更: 認証付きクライアントを作成 ▼▼▼
         const supabase = await createClerkSupabaseClient(getToken);
 
         const insertData: any = {
@@ -392,7 +470,7 @@ export default function HomePage() {
                 const notifTitle = selectedTask ? selectedTask.title : '新規投稿';
 
                 const notificationsToInsert = followers.map(f => ({
-                    id: crypto.randomUUID(), // IDを明示的に付与
+                    id: crypto.randomUUID(),
                     user_id: f.follower_id,
                     actor_id: myProfile.id,
                     type: notifType,
@@ -424,7 +502,8 @@ export default function HomePage() {
                 className={`fixed top-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-b border-gray-100 transition-transform duration-300 ${isHeaderVisible ? 'translate-y-0' : '-translate-y-full'
                     }`}
             >
-                <div className="px-4 h-14 flex items-center justify-start">
+                {/* ▼▼▼ 変更: ヘッダー上段（ロゴと通知アイコン） ▼▼▼ */}
+                <div className="px-4 h-14 flex items-center justify-between">
                     <div className="w-8 h-8 relative">
                         <img
                             src="/logo.png"
@@ -435,6 +514,69 @@ export default function HomePage() {
                                 e.currentTarget.parentElement!.innerHTML = '<span class="font-bold text-sky-500 italic text-xl">A+</span>';
                             }}
                         />
+                    </div>
+
+                    {/* 通知アイコン */}
+                    <div className="relative">
+                        <button
+                            className="p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors relative"
+                            onClick={() => setIsNotifDropdownOpen(!isNotifDropdownOpen)}
+                        >
+                            <Bell className="w-6 h-6" />
+                            {unreadCount > 0 && (
+                                <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border border-white" />
+                            )}
+                        </button>
+
+                        {/* 通知ドロップダウン */}
+                        {isNotifDropdownOpen && (
+                            <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <div className="p-3 border-b border-gray-100 flex justify-between items-center">
+                                    <h3 className="font-bold text-sm text-gray-700">通知</h3>
+                                    {unreadCount > 0 && <span className="text-xs text-sky-500 font-bold">{unreadCount}件の未読</span>}
+                                </div>
+                                <div className="max-h-96 overflow-y-auto">
+                                    {notifications.length > 0 ? (
+                                        notifications.map((notif) => (
+                                            <button
+                                                key={notif.id}
+                                                onClick={() => handleNotificationClick(notif)}
+                                                className={`w-full text-left p-3 flex gap-3 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0 ${!notif.is_read ? 'bg-sky-50/50' : ''}`}
+                                            >
+                                                <div className="flex-shrink-0">
+                                                    <img
+                                                        src={notif.actor?.avatar_url || "https://api.dicebear.com/7.x/avataaars/svg?seed=Guest"}
+                                                        className="w-10 h-10 rounded-full border border-gray-100"
+                                                    />
+                                                    <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5">
+                                                        {notif.type === 'like' && <Heart className="w-4 h-4 text-pink-500 fill-current" />}
+                                                        {notif.type === 'comment' && <MessageCircle className="w-4 h-4 text-sky-500 fill-current" />}
+                                                        {(notif.type === 'followed_post' || notif.type === 'followed_task_complete') && <Plus className="w-4 h-4 text-emerald-500" />}
+                                                    </div>
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm text-gray-800 line-clamp-2">
+                                                        <span className="font-bold">{notif.actor?.name}</span>
+                                                        {notif.type === 'like' && "さんがあなたの投稿にいいねしました"}
+                                                        {notif.type === 'comment' && "さんがコメントしました"}
+                                                        {notif.type === 'followed_post' && "さんが新しい投稿をしました"}
+                                                        {notif.type === 'followed_task_complete' && "さんがタスクを達成しました！"}
+                                                    </p>
+                                                    <p className="text-xs text-gray-400 mt-1">{getRelativeTime(notif.created_at)}</p>
+                                                </div>
+                                                {!notif.is_read && <div className="w-2 h-2 bg-sky-500 rounded-full flex-shrink-0 mt-2" />}
+                                            </button>
+                                        ))
+                                    ) : (
+                                        <div className="p-8 text-center text-gray-400 text-sm">通知はありません</div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                        {/* クリック時にメニューを閉じるための背景オーバーレイ */}
+                        {isNotifDropdownOpen && (
+                            <div className="fixed inset-0 z-40 bg-transparent" onClick={() => setIsNotifDropdownOpen(false)} />
+                        )}
                     </div>
                 </div>
 
@@ -687,7 +829,6 @@ export default function HomePage() {
                                 </div>
                                 <p className="text-lg text-gray-900 whitespace-pre-wrap mb-4">{selectedPost.content}</p>
 
-                                {/* ▼▼▼ 変更: 詳細画面でもスナップショット優先で表示 ▼▼▼ */}
                                 {(selectedPost.task_snapshot?.title || selectedPost.tasks?.title) && (
                                     <div className="mb-6 border border-emerald-100 bg-emerald-50/50 rounded-xl p-4 flex items-center gap-3">
                                         <div className="p-2 bg-emerald-100 text-emerald-600 rounded-full">

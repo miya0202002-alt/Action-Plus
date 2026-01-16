@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Check, Plus, Calendar, Trophy, AlertCircle, X, Target, Clock, ArrowLeft, Pencil, CheckCircle2, ChevronRight, ChevronDown } from 'lucide-react';
+import { Check, Plus, Calendar, Trophy, AlertCircle, X, Target, Clock, ArrowLeft, Pencil, ChevronRight, ChevronDown } from 'lucide-react';
 import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 import { useUser, useAuth } from '@clerk/nextjs';
 
@@ -12,7 +12,7 @@ type Task = {
     deadline: string;
     isCompleted: boolean;
     completedDate?: string;
-    goal_input: string;
+    goal_title: string;
 };
 
 type GoalGroup = {
@@ -38,10 +38,8 @@ export default function TasksPage() {
     const [newGoalTitle, setNewGoalTitle] = useState("");
 
     // 表示制御用
-    const [hiddenGroupIds, setHiddenGroupIds] = useState<string[]>([]); // ToDoから隠すグループ
-    const [celebratingGroupIds, setCelebratingGroupIds] = useState<string[]>([]); // 演出中のグループ
-
-    // ★追加: アコーディオンの開閉管理（IDが入っているものが開いている）
+    const [hiddenGroupIds, setHiddenGroupIds] = useState<string[]>([]);
+    const [celebratingGroupIds, setCelebratingGroupIds] = useState<string[]>([]);
     const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
 
     // データ管理
@@ -77,7 +75,10 @@ export default function TasksPage() {
         const groups: { [key: string]: Task[] } = {};
 
         data.forEach((row: any) => {
-            const deadlineStr = row.due_date ? row.due_date.split('T')[0] : "";
+            // ★修正: ここを row.due_date から row.deadline に変更しました
+            const deadlineStr = row.deadline ? row.deadline.split('T')[0] : "";
+
+            const groupTitle = row.goal_title || "未分類";
 
             const task: Task = {
                 id: row.id.toString(),
@@ -85,13 +86,13 @@ export default function TasksPage() {
                 deadline: deadlineStr,
                 isCompleted: row.is_completed,
                 completedDate: row.is_completed ? (new Date().toISOString().split('T')[0]) : undefined,
-                goal_input: row.goal_input || "未分類"
+                goal_title: groupTitle
             };
 
-            if (!groups[task.goal_input]) {
-                groups[task.goal_input] = [];
+            if (!groups[task.goal_title]) {
+                groups[task.goal_title] = [];
             }
-            groups[task.goal_input].push(task);
+            groups[task.goal_title].push(task);
         });
 
         const formattedGroups: GoalGroup[] = Object.keys(groups).map(title => ({
@@ -111,7 +112,6 @@ export default function TasksPage() {
                 setHiddenGroupIds(prev => [...prev, groupId]);
                 setCelebratingGroupIds(prev => prev.filter(id => id !== groupId));
             }, 3000);
-
             return () => clearTimeout(timer);
         });
     }, [celebratingGroupIds]);
@@ -119,12 +119,11 @@ export default function TasksPage() {
 
     // --- 各種操作 ---
 
-    // ★追加: アコーディオンの切り替え
     const toggleAccordion = (groupId: string) => {
         setExpandedGroupIds(prev =>
             prev.includes(groupId)
-                ? prev.filter(id => id !== groupId) // 閉じる
-                : [...prev, groupId] // 開く
+                ? prev.filter(id => id !== groupId)
+                : [...prev, groupId]
         );
     };
 
@@ -150,7 +149,7 @@ export default function TasksPage() {
     };
 
     const toggleTaskCompletion = async (goalId: string, taskId: string) => {
-        // 1. 楽観的UI更新
+        // 楽観的UI更新
         const currentGroups = [...goalGroups];
         let targetTask: Task | undefined;
         let newIsCompleted = false;
@@ -170,10 +169,8 @@ export default function TasksPage() {
                 };
             });
 
-            // 全タスク完了判定
             const isAllCompleted = updatedTasks.length > 0 && updatedTasks.every(t => t.isCompleted);
             if (isAllCompleted && !group.tasks.every(t => t.isCompleted)) {
-                // 今回の操作で「全て完了」になった場合
                 groupBecameAllDone = true;
             }
 
@@ -183,7 +180,6 @@ export default function TasksPage() {
 
         if (groupBecameAllDone && newIsCompleted) {
             setCelebratingGroupIds(prev => [...prev, goalId]);
-            // ★完了時は演出が見えるように強制的に開く状態を維持（必要なら）
             if (!expandedGroupIds.includes(goalId)) {
                 setExpandedGroupIds(prev => [...prev, goalId]);
             }
@@ -192,7 +188,7 @@ export default function TasksPage() {
             setCelebratingGroupIds(prev => prev.filter(id => id !== goalId));
         }
 
-        // 2. DB更新
+        // DB更新
         if (user && targetTask) {
             const supabase = await createClerkSupabaseClient(getToken);
             const { error } = await supabase
@@ -204,7 +200,6 @@ export default function TasksPage() {
                 console.error("更新エラー:", error);
                 setGoalGroups(currentGroups);
                 alert("更新に失敗しました");
-                return;
             }
         }
     };
@@ -258,16 +253,17 @@ export default function TasksPage() {
         if (!newTaskTitle) return alert("タスクの内容を入力してください");
         if (!newTaskDeadline) return alert("期限を設定してください");
 
-        const due_date = new Date(newTaskDeadline).toISOString();
+        const dateToSave = new Date(newTaskDeadline).toISOString();
         const supabase = await createClerkSupabaseClient(getToken);
 
         if (editingTaskId) {
+            // ★修正: ここも deadline に変更しました
             const { error } = await supabase
                 .from('tasks')
                 .update({
                     title: newTaskTitle,
-                    due_date: due_date,
-                    goal_input: targetGoalTitle
+                    deadline: dateToSave,
+                    goal_title: targetGoalTitle
                 })
                 .eq('id', editingTaskId);
 
@@ -276,13 +272,14 @@ export default function TasksPage() {
                 return;
             }
         } else {
+            // ★修正: ここも deadline に変更しました
             const { error } = await supabase
                 .from('tasks')
                 .insert({
                     user_id: user.id,
                     title: newTaskTitle,
-                    due_date: due_date,
-                    goal_input: targetGoalTitle,
+                    deadline: dateToSave,
+                    goal_title: targetGoalTitle,
                     is_completed: false
                 });
 
@@ -331,7 +328,6 @@ export default function TasksPage() {
             </header>
 
             <div className="p-4 space-y-4">
-                {/* ToDoが空の時：★演出中でない場合のみ表示★ */}
                 {activeTab === "todo" && !hasTodoTasks && !isLoading && !isCelebratingAny && (
                     <div className="flex flex-col items-center justify-center pt-20 text-center text-gray-400 animate-in fade-in slide-in-from-bottom-2">
                         <AlertCircle className="w-12 h-12 mb-4 text-sky-200" />
@@ -339,7 +335,6 @@ export default function TasksPage() {
                     </div>
                 )}
 
-                {/* 完了が空の時 */}
                 {activeTab === "done" && !hasDoneTasks && !isLoading && (
                     <div className="flex flex-col items-center justify-center pt-20 text-center text-gray-400 animate-in fade-in slide-in-from-bottom-2">
                         <Trophy className="w-12 h-12 mb-4 text-gray-200" />
@@ -353,7 +348,6 @@ export default function TasksPage() {
                     );
 
                     const isCelebrating = celebratingGroupIds.includes(group.id);
-                    // ★追加：アコーディオンが開いているかチェック
                     const isExpanded = expandedGroupIds.includes(group.id);
 
                     if (visibleTasks.length === 0 && !isCelebrating) return null;
@@ -361,7 +355,6 @@ export default function TasksPage() {
 
                     return (
                         <div key={group.id} className="animate-in fade-in slide-in-from-bottom-2 duration-300 border border-gray-100 rounded-xl overflow-hidden shadow-sm bg-white">
-                            {/* ★変更: ヘッダー部分をクリック可能にし、アコーディオン化 */}
                             <div
                                 onClick={() => toggleAccordion(group.id)}
                                 className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors select-none"
@@ -378,7 +371,6 @@ export default function TasksPage() {
                                 </div>
                             </div>
 
-                            {/* ★変更: 開いている時のみ中身を表示 */}
                             {isExpanded && (
                                 <div className="px-4 pb-4 space-y-3 bg-gray-50/50 pt-2 border-t border-gray-100">
                                     {activeTab === "todo" && isCelebrating && (
@@ -386,7 +378,6 @@ export default function TasksPage() {
                                             <Trophy className="w-10 h-10 text-yellow-400 mx-auto mb-2" />
                                             <p className="font-bold text-sky-700">お疲れさまでした！</p>
                                             <p className="text-xs text-sky-500 mt-1">この目標のタスクは全て完了しました。</p>
-                                            <p className="text-[10px] text-sky-400 mt-2">（完了リストへ移動します...）</p>
                                         </div>
                                     )}
 
@@ -400,7 +391,7 @@ export default function TasksPage() {
                                         >
                                             <button
                                                 onClick={(e) => {
-                                                    e.stopPropagation(); // アコーディオンが閉じないように伝播を止める
+                                                    e.stopPropagation();
                                                     toggleTaskCompletion(group.id, task.id);
                                                 }}
                                                 className={`flex-shrink-0 mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${task.isCompleted ? "bg-sky-500 border-sky-500" : "bg-white border-gray-300"
@@ -419,6 +410,7 @@ export default function TasksPage() {
                                                     <div className={`flex items-center gap-1 text-xs ${task.isCompleted ? "text-gray-300" : "text-sky-500"
                                                         }`}>
                                                         <Calendar className="w-3 h-3" />
+                                                        {/* ★ここが正しく表示されるようになります */}
                                                         <span>期限: {task.deadline}</span>
                                                     </div>
                                                 </div>
@@ -438,7 +430,6 @@ export default function TasksPage() {
                                                             openEditModal(group.id, task);
                                                         }}
                                                         className="p-1.5 text-gray-400 hover:text-sky-500 hover:bg-sky-50 rounded-lg transition-colors"
-                                                        title="編集"
                                                     >
                                                         <Pencil className="w-4 h-4" />
                                                     </button>
@@ -449,12 +440,10 @@ export default function TasksPage() {
                                                         deleteTask(group.id, task.id);
                                                     }}
                                                     className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                                    title="削除"
                                                 >
                                                     <X className="w-4 h-4" />
                                                 </button>
                                             </div>
-
                                         </div>
                                     ))}
                                 </div>
