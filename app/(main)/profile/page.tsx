@@ -454,9 +454,22 @@ export default function ProfilePage() {
                                 className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors"
                             >
                                 <div className="flex items-center gap-3">
-                                    <div className="w-1 h-5 bg-sky-500 rounded-full" />
-                                    <h2 className="font-bold text-gray-800 text-base">{group.title}</h2>
-                                    <span className="text-xs text-gray-400 font-medium ml-2 bg-gray-100 px-2 py-0.5 rounded-full">
+                                    <div className="w-1 h-8 bg-sky-500 rounded-full" />
+                                    <div className="flex flex-col min-w-0">
+                                        {group.title.includes(": ") ? (
+                                            <>
+                                                <span className="text-[10px] text-sky-500 font-bold uppercase tracking-wider truncate mb-0.5">
+                                                    {group.title.split(": ")[0]}
+                                                </span>
+                                                <h2 className="font-bold text-gray-800 text-sm truncate">
+                                                    {group.title.split(": ")[1]}
+                                                </h2>
+                                            </>
+                                        ) : (
+                                            <h2 className="font-bold text-gray-800 text-base truncate">{group.title}</h2>
+                                        )}
+                                    </div>
+                                    <span className="text-[10px] text-gray-400 font-bold bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
                                         {group.tasks.length}
                                     </span>
                                 </div>

@@ -14,10 +14,20 @@ type TaskItem = {
   estimatedHours: number;
 };
 
+type SubElementItem = {
+  subElementTitle: string;
+  tasks: TaskItem[];
+};
+
+type ElementItem = {
+  elementTitle: string;
+  subElements: SubElementItem[];
+};
+
 type AiLog = {
   id: string;
   goal_input: string;
-  ai_response: { roadmap: TaskItem[] };
+  ai_response: { roadmap: ElementItem[] };
   created_at: string;
 };
 
@@ -35,7 +45,9 @@ export default function PlanPage() {
 
   // アプリ状態
   const [isLoading, setIsLoading] = useState(false);
-  const [roadmap, setRoadmap] = useState<TaskItem[] | null>(null);
+  const [roadmap, setRoadmap] = useState<ElementItem[] | null>(null);
+  const [expandedElements, setExpandedElements] = useState<number[]>([]);
+  const [expandedSubElements, setExpandedSubElements] = useState<string[]>([]); // "elementIdx-subElementIdx"
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // 履歴表示用
@@ -121,18 +133,18 @@ export default function PlanPage() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
-      const sortedRoadmap = (data.roadmap || []).sort((a: TaskItem, b: TaskItem) => {
-        return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
-      });
-
-      setRoadmap(sortedRoadmap);
+      const generatedRoadmap = (data.roadmap || []) as ElementItem[];
+      setRoadmap(generatedRoadmap);
+      // 初期状態ではLevel 1のみ表示（すべて閉じている状態にする）
+      setExpandedElements([]);
+      setExpandedSubElements([]);
 
       if (user) {
         const supabase = await createClerkSupabaseClient(getToken);
         const { error: logError } = await supabase.from('ai_logs').insert({
           user_id: user.id,
           goal_input: goal,
-          ai_response: { roadmap: sortedRoadmap }
+          ai_response: { roadmap: generatedRoadmap }
         });
         if (!logError) {
           fetchAndCleanupLogs();
@@ -148,11 +160,24 @@ export default function PlanPage() {
     }
   };
 
-  const handleTaskChange = (index: number, field: keyof TaskItem, value: string) => {
+  const handleTaskChange = (elementIndex: number, subElementIndex: number, taskIndex: number, field: keyof TaskItem, value: any) => {
     if (!roadmap) return;
     const newRoadmap = [...roadmap];
-    (newRoadmap[index] as any)[field] = value;
+    (newRoadmap[elementIndex].subElements[subElementIndex].tasks[taskIndex] as any)[field] = value;
     setRoadmap(newRoadmap);
+  };
+
+  const toggleSubElement = (eIdx: number, seIdx: number) => {
+    const key = `${eIdx}-${seIdx}`;
+    setExpandedSubElements(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    );
+  };
+
+  const toggleElement = (index: number) => {
+    setExpandedElements(prev =>
+      prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
+    );
   };
 
   // --- 保存処理 ---
@@ -180,17 +205,21 @@ export default function PlanPage() {
       }
 
       // 2. tasksテーブルにタスクを一括保存
-      const tasksToInsert = roadmap.map((task) => ({
-        user_id: user.id,
-        title: task.title,
-        description: task.description,
-        deadline: new Date(task.deadline).toISOString(),
-        is_completed: false,
-        estimated_hours: task.estimatedHours,
-        priority: task.priority,
-        // 新しく作ったカラム goal_title に目標を入れる
-        goal_title: goal
-      }));
+      const tasksToInsert = roadmap.flatMap((element) =>
+        element.subElements.flatMap((subElement) =>
+          subElement.tasks.map((task) => ({
+            user_id: user.id,
+            title: task.title,
+            description: task.description,
+            deadline: new Date(task.deadline).toISOString(),
+            is_completed: false,
+            estimated_hours: task.estimatedHours,
+            priority: task.priority,
+            // goal_title に 「目標: 要素名 > 中項目名」 の形式で入れる
+            goal_title: `${goal}: ${element.elementTitle} > ${subElement.subElementTitle}`
+          }))
+        )
+      );
 
       const { error: tasksError } = await supabase
         .from('tasks')
@@ -339,15 +368,30 @@ export default function PlanPage() {
                 </div>
                 <div className="space-y-4">
                   <p className="text-xs font-bold text-gray-400 border-b pb-1">AIが提案するロードマップ</p>
-                  {selectedLog.ai_response.roadmap.map((item, i) => (
-                    <div key={i} className="relative pl-6 before:content-[''] before:absolute before:left-0 before:top-2 before:bottom-0 before:w-0.5 before:bg-gray-100 last:before:hidden">
-                      <div className="absolute left-[-4px] top-1.5 w-2.5 h-2.5 rounded-full bg-sky-400" />
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-bold text-gray-800">{item.title}</p>
-                          <span className="text-[10px] font-bold text-gray-400">{item.deadline}</span>
-                        </div>
-                        <p className="text-xs text-gray-600 leading-relaxed bg-gray-50 p-2 rounded-lg">{item.description}</p>
+                  {selectedLog.ai_response.roadmap.map((element, eIdx) => (
+                    <div key={eIdx} className="space-y-4">
+                      <div className="flex items-center gap-2 border-l-4 border-blue-500 pl-3 py-1">
+                        <p className="text-sm font-bold text-gray-800">{element.elementTitle}</p>
+                      </div>
+                      <div className="pl-4 space-y-4">
+                        {element.subElements?.map((sub, seIdx) => (
+                          <div key={seIdx} className="space-y-3">
+                            <div className="flex items-center gap-2 border-l-4 border-orange-400 pl-3 py-1">
+                              <p className="text-xs font-bold text-gray-700">{sub.subElementTitle}</p>
+                            </div>
+                            <div className="pl-4 space-y-3">
+                              {sub.tasks.map((task, tIdx) => (
+                                <div key={tIdx} className="space-y-1 border-l-4 border-green-400 pl-3 py-1">
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-[11px] font-bold text-gray-700">{task.title}</p>
+                                    <span className="text-[9px] text-gray-400">{task.deadline}</span>
+                                  </div>
+                                  <p className="text-[10px] text-gray-500 bg-gray-50 p-2 rounded-lg leading-relaxed">{task.description}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ))}
@@ -371,34 +415,106 @@ export default function PlanPage() {
       </header>
 
       <div className="max-w-md mx-auto p-4 space-y-4 animate-in slide-in-from-bottom-4">
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-          <p className="text-xs text-gray-500 leading-relaxed italic">
-            目標: <span className="text-gray-900 font-bold ml-1">{goal}</span>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 border-l-8 border-l-blue-500 text-center space-y-2">
+          <h2 className="text-xl font-black text-sky-600">
+            目標: {goal}
+          </h2>
+          <p className="text-xs text-gray-400 font-bold">
+            各項目をクリックして展開できます
           </p>
         </div>
 
-        <div className="space-y-3">
-          {roadmap.map((task, index) => (
-            <div key={index} className={`bg-white p-4 rounded-xl shadow-sm border border-gray-50 ${getBorderColor(task.priority)}`}>
-              <div className="flex items-center gap-2 mb-2">
-                <input type="text" value={task.title} onChange={(e) => handleTaskChange(index, "title", e.target.value)} className="flex-1 font-bold text-gray-800 bg-transparent border-b border-gray-100 focus:border-sky-500 outline-none text-sm py-1" />
-              </div>
-              <div className="mb-3">
-                <textarea value={task.description} onChange={(e) => handleTaskChange(index, "description", e.target.value)} className="w-full text-xs text-gray-500 bg-gray-50 p-2 rounded-lg outline-none resize-none" rows={2} />
-              </div>
-              <div className="flex items-center justify-between text-xs pt-2 border-t border-gray-50">
-                <div className="flex items-center gap-2 text-gray-400">
-                  <Calendar className="w-3 h-3 text-sky-400" />
-                  <input type="date" value={task.deadline} onChange={(e) => handleTaskChange(index, "deadline", e.target.value)} className="outline-none bg-transparent" />
+        <div className="space-y-4">
+          {roadmap.map((element, eIdx) => (
+            <div key={eIdx} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden text-sm border-l-4 border-l-blue-500">
+              <button
+                onClick={() => toggleElement(eIdx)}
+                className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <h3 className="font-bold text-gray-800 text-left truncate">{element.elementTitle}</h3>
                 </div>
-                <div className="bg-gray-100 px-2 py-0.5 rounded text-[10px] font-bold text-gray-500">{task.estimatedHours}h</div>
-              </div>
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center border ${expandedElements.includes(eIdx) ? 'border-sky-500 bg-sky-50' : 'border-gray-200'}`}>
+                  {expandedElements.includes(eIdx) ? (
+                    <span className="text-sky-500 font-bold text-lg leading-none mt-[-2px]">-</span>
+                  ) : (
+                    <span className="text-gray-400 font-bold text-lg leading-none mt-[-1px]">+</span>
+                  )}
+                </div>
+              </button>
+
+              {expandedElements.includes(eIdx) && (
+                <div className="px-4 pb-4 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div className="h-px bg-gray-50 mb-1" />
+                  {element.subElements?.map((sub, seIdx) => (
+                    <div key={seIdx} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden border-l-4 border-l-orange-400">
+                      <button
+                        onClick={() => toggleSubElement(eIdx, seIdx)}
+                        className="w-full p-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                      >
+                        <h4 className="font-bold text-gray-700 text-xs text-left truncate">{sub.subElementTitle}</h4>
+                        <div className={`w-5 h-5 rounded-full flex items-center justify-center border ${expandedSubElements.includes(`${eIdx}-${seIdx}`) ? 'border-orange-500 bg-orange-50' : 'border-gray-200'}`}>
+                          {expandedSubElements.includes(`${eIdx}-${seIdx}`) ? (
+                            <span className="text-orange-500 font-bold text-md leading-none mt-[-2px]">-</span>
+                          ) : (
+                            <span className="text-gray-400 font-bold text-md leading-none mt-[-1px]">+</span>
+                          )}
+                        </div>
+                      </button>
+
+                      {expandedSubElements.includes(`${eIdx}-${seIdx}`) && (
+                        <div className="px-3 pb-3 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
+                          <div className="h-px bg-gray-50 mb-1" />
+                          {sub.tasks.map((task, tIdx) => (
+                            <div key={tIdx} className={`p-3 rounded-xl border border-gray-50 bg-gray-50/30 border-l-4 border-l-green-400`}>
+                              <div className="flex items-center gap-2 mb-2">
+                                <input
+                                  type="text"
+                                  value={task.title}
+                                  onChange={(e) => handleTaskChange(eIdx, seIdx, tIdx, "title", e.target.value)}
+                                  className="flex-1 font-bold text-gray-800 bg-transparent border-b border-transparent focus:border-sky-500 outline-none text-xs py-0.5"
+                                />
+                              </div>
+                              <div className="mb-2">
+                                <textarea
+                                  value={task.description}
+                                  onChange={(e) => handleTaskChange(eIdx, seIdx, tIdx, "description", e.target.value)}
+                                  className="w-full text-[10px] text-gray-500 bg-white p-2 rounded-lg outline-none resize-none border border-gray-100 leading-relaxed"
+                                  rows={2}
+                                />
+                              </div>
+                              <div className="flex items-center justify-between text-[10px]">
+                                <div className="flex items-center gap-1.5 text-gray-400">
+                                  <Calendar className="w-3 h-3 text-sky-400" />
+                                  <input
+                                    type="date"
+                                    value={task.deadline}
+                                    onChange={(e) => handleTaskChange(eIdx, seIdx, tIdx, "deadline", e.target.value)}
+                                    className="outline-none bg-transparent"
+                                  />
+                                </div>
+                                <div className="bg-white border border-gray-100 px-1.5 py-0.5 rounded font-bold text-gray-400">
+                                  {task.estimatedHours}h
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
 
-        <button onClick={handleSaveAll} className="w-full bg-sky-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-sky-200 mt-6 flex items-center justify-center gap-2">
-          <CheckCircle2 className="w-5 h-5" /> タスクシートに追加する
+        <button onClick={handleSaveAll} className="w-full bg-sky-500 text-white font-black py-5 rounded-2xl shadow-xl shadow-sky-100 mt-8 flex flex-col items-center justify-center gap-1 group active:scale-95 transition-all">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-6 h-6" />
+            <span className="text-lg">これをやる事に追加する</span>
+          </div>
+          <span className="text-[10px] opacity-70 font-bold">やる事シートへ移動します</span>
         </button>
       </div>
     </div>
