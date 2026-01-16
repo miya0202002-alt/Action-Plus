@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Check, Plus, Calendar, Trophy, AlertCircle, X, Target, Clock, ArrowLeft, Pencil, ChevronRight, ChevronDown } from 'lucide-react';
 import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 import { useUser, useAuth } from '@clerk/nextjs';
+import { formatDeadlineLabel } from '@/lib/dateUtils';
 
 type Task = {
     id: string;
@@ -423,7 +424,6 @@ export default function TasksPage() {
                                 <div className="flex items-center gap-3">
                                     <div className="w-1 h-8 bg-sky-500 rounded-full" />
                                     <h2 className="font-bold text-gray-800 text-base flex items-center gap-2">
-                                        <Target className="w-4 h-4 text-sky-500" />
                                         {goalGroup.goalName}
                                     </h2>
                                     <span className="text-[10px] text-gray-400 font-bold bg-white px-2 py-0.5 rounded-full border border-gray-100">
@@ -524,7 +524,14 @@ export default function TasksPage() {
                                                                                             <div className={`flex items-center gap-1 text-[10px] ${task.isCompleted ? "text-gray-300" : "text-sky-500 font-bold"
                                                                                                 }`}>
                                                                                                 <Calendar className="w-3 h-3" />
-                                                                                                <span>{task.deadline}</span>
+                                                                                                {!task.isCompleted ? (
+                                                                                                    (() => {
+                                                                                                        const { label, color } = formatDeadlineLabel(task.deadline);
+                                                                                                        return <span className={color}>{label}</span>;
+                                                                                                    })()
+                                                                                                ) : (
+                                                                                                    <span>{task.deadline}</span>
+                                                                                                )}
                                                                                             </div>
                                                                                         </div>
                                                                                     </div>
@@ -598,7 +605,6 @@ export default function TasksPage() {
 
                             <div>
                                 <label className="flex items-center gap-2 text-xs font-bold text-gray-500 mb-3">
-                                    <Target className="w-4 h-4" />
                                     どの目標のタスクですか？ <span className="text-red-500 text-sm ml-1">*</span>
                                 </label>
                                 {isCreatingGoal ? (

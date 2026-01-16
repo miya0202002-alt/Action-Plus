@@ -53,16 +53,22 @@ export async function POST(req: Request) {
 
       【出力ルール】
       必ず以下のJSON形式の配列で出力してください。
+      - 言葉選び：専門用語を避け、誰にでも分かる「優しく分かりやすい言葉」を使用してください。
+        （例：「語彙の習得」→「単語を覚える」、「進捗管理の徹底」→「やったことを記録する」）
+      - 禁止事項：
+          - タイトルの先頭に「①」「1.」「○」などの記号や番号を絶対に付けないでください。
+          - 「〜する」といった行動ではなく、「〜できている状態」という完了状態としてタスクを記述してください。
+          - deadlineは ${todayStr} から ${targetStr} の間で分散させてください。
 
       [
         {
-          "elementTitle": "大項目名（例：リスニングスキル）",
+          "elementTitle": "大項目名",
           "subElements": [
             {
-              "subElementTitle": "中項目名（例：パート1対策）",
+              "subElementTitle": "中項目名",
               "tasks": [
                 {
-                  "title": "到達状態タスク（例：写真描写の頻出語彙を理解している状態）",
+                  "title": "タスク名（完了状態）",
                   "deadline": "YYYY-MM-DD",
                   "priority": "High",
                   "estimatedHours": 2
@@ -72,11 +78,6 @@ export async function POST(req: Request) {
           ]
         }
       ]
-
-      【禁止事項】
-      - ユーザーを励ますなどの情緒的な対話は一切不要です。構造の提示に集中してください。
-      - 「努力が必要」などの抽象的な表現を避け、具体的な学習対象を明示してください。
-      - deadlineは ${todayStr} から ${targetStr} の間で分散させてください。
     `;
 
     // AI生成実行

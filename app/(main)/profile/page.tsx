@@ -10,6 +10,7 @@ import { useUser, useAuth } from '@clerk/nextjs';
 import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { formatDeadlineLabel } from '@/lib/dateUtils';
 
 // --- 型定義 ---
 interface Task {
@@ -517,7 +518,6 @@ export default function ProfilePage() {
                                 <div className="flex items-center gap-3">
                                     <div className="w-1 h-8 bg-sky-500 rounded-full" />
                                     <h2 className="font-bold text-gray-800 text-sm flex items-center gap-2">
-                                        <Trophy className="w-4 h-4 text-sky-500" />
                                         {goalGroup.goalName}
                                     </h2>
                                 </div>
@@ -574,8 +574,11 @@ export default function ProfilePage() {
                                                                                         <p className="text-[11px] font-bold leading-relaxed truncate pr-4 text-gray-400 line-through">
                                                                                             {task.title}
                                                                                         </p>
-                                                                                        <div className="text-[9px] text-green-600 font-bold mt-0.5">
-                                                                                            完了: {formatDate(task.completed_at || task.created_at)}
+                                                                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                                                                            <Calendar className="w-2.5 h-2.5 text-gray-300" />
+                                                                                            <span className="text-[9px] text-gray-400 font-bold">
+                                                                                                完了: {formatDate(task.completed_at || task.created_at)}
+                                                                                            </span>
                                                                                         </div>
                                                                                     </div>
                                                                                 </div>

@@ -4,6 +4,7 @@ import { Loader2, Sparkles, Network, Calendar, Clock, CheckCircle2, AlertCircle,
 import { useRouter } from "next/navigation";
 import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 import { useUser, useAuth } from '@clerk/nextjs';
+import { formatDeadlineLabel } from '@/lib/dateUtils';
 
 // --- 型定義 ---
 type TaskItem = {
@@ -382,7 +383,9 @@ export default function PlanPage() {
                                 <div key={tIdx} className="space-y-1 border-l-4 border-green-400 pl-3 py-1">
                                   <div className="flex items-center justify-between">
                                     <p className="text-[11px] font-bold text-gray-700">{task.title}</p>
-                                    <span className="text-[9px] text-gray-400">{task.deadline}</span>
+                                    <span className={`text-[9px] font-bold ${formatDeadlineLabel(task.deadline).color}`}>
+                                      {formatDeadlineLabel(task.deadline).label}
+                                    </span>
                                   </div>
                                 </div>
                               ))}
