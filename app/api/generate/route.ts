@@ -63,7 +63,6 @@ export async function POST(req: Request) {
               "tasks": [
                 {
                   "title": "到達状態タスク（例：写真描写の頻出語彙を理解している状態）",
-                  "description": "なぜこの状態が必要か、達成の判定基準など",
                   "deadline": "YYYY-MM-DD",
                   "priority": "High",
                   "estimatedHours": 2

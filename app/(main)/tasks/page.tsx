@@ -5,20 +5,29 @@ import { Check, Plus, Calendar, Trophy, AlertCircle, X, Target, Clock, ArrowLeft
 import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 import { useUser, useAuth } from '@clerk/nextjs';
 
-// --- 型定義 ---
 type Task = {
     id: string;
     title: string;
     deadline: string;
     isCompleted: boolean;
     completedDate?: string;
-    goal_title: string;
+    goal_title: string; // "Goal: Element > SubElement"
+};
+
+type SubElementGroup = {
+    title: string;
+    fullTitle: string; // Mapping back to goal_title for database calls
+    tasks: Task[];
+};
+
+type ElementGroup = {
+    title: string;
+    subElements: SubElementGroup[];
 };
 
 type GoalGroup = {
-    id: string;
-    title: string;
-    tasks: Task[];
+    goalName: string;
+    elements: ElementGroup[];
 };
 
 export default function TasksPage() {
@@ -38,9 +47,11 @@ export default function TasksPage() {
     const [newGoalTitle, setNewGoalTitle] = useState("");
 
     // 表示制御用
-    const [hiddenGroupIds, setHiddenGroupIds] = useState<string[]>([]);
-    const [celebratingGroupIds, setCelebratingGroupIds] = useState<string[]>([]);
-    const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
+    const [hiddenGroupIds, setHiddenGroupIds] = useState<string[]>([]); // fullTitle
+    const [celebratingGroupIds, setCelebratingGroupIds] = useState<string[]>([]); // fullTitle
+    const [expandedGoals, setExpandedGoals] = useState<string[]>([]);
+    const [expandedElements, setExpandedElements] = useState<string[]>([]); // "Goal-Element"
+    const [expandedSubElements, setExpandedSubElements] = useState<string[]>([]); // fullTitle
 
     // データ管理
     const [goalGroups, setGoalGroups] = useState<GoalGroup[]>([]);
@@ -71,34 +82,57 @@ export default function TasksPage() {
             return;
         }
 
-        // データを整形してグループ化
-        const groups: { [key: string]: Task[] } = {};
+        // 階層構造の構築
+        const hierarchy: { [goalName: string]: { [elementName: string]: { [subElementName: string]: Task[] } } } = {};
 
         data.forEach((row: any) => {
-            // ★修正: ここを row.due_date から row.deadline に変更しました
             const deadlineStr = row.deadline ? row.deadline.split('T')[0] : "";
+            const fullTitle = row.goal_title || "未分類";
 
-            const groupTitle = row.goal_title || "未分類";
+            let goalName = "未分類";
+            let elementName = "その他";
+            let subElementName = "全般";
+
+            if (fullTitle.includes(": ")) {
+                const [g, rest] = fullTitle.split(": ");
+                goalName = g;
+                if (rest.includes(" > ")) {
+                    const [e, se] = rest.split(" > ");
+                    elementName = e;
+                    subElementName = se;
+                } else {
+                    elementName = rest;
+                }
+            } else {
+                goalName = fullTitle;
+            }
 
             const task: Task = {
                 id: row.id.toString(),
                 title: row.title,
                 deadline: deadlineStr,
                 isCompleted: row.is_completed,
-                completedDate: row.is_completed ? (new Date().toISOString().split('T')[0]) : undefined,
-                goal_title: groupTitle
+                completedDate: row.is_completed ? (new Date(row.updated_at || Date.now()).toISOString().split('T')[0]) : undefined,
+                goal_title: fullTitle
             };
 
-            if (!groups[task.goal_title]) {
-                groups[task.goal_title] = [];
-            }
-            groups[task.goal_title].push(task);
+            if (!hierarchy[goalName]) hierarchy[goalName] = {};
+            if (!hierarchy[goalName][elementName]) hierarchy[goalName][elementName] = {};
+            if (!hierarchy[goalName][elementName][subElementName]) hierarchy[goalName][elementName][subElementName] = [];
+
+            hierarchy[goalName][elementName][subElementName].push(task);
         });
 
-        const formattedGroups: GoalGroup[] = Object.keys(groups).map(title => ({
-            id: title,
-            title: title,
-            tasks: groups[title]
+        const formattedGroups: GoalGroup[] = Object.keys(hierarchy).map(goalName => ({
+            goalName,
+            elements: Object.keys(hierarchy[goalName]).map(elementName => ({
+                title: elementName,
+                subElements: Object.keys(hierarchy[goalName][elementName]).map(subElementName => ({
+                    title: subElementName,
+                    fullTitle: `${goalName}: ${elementName}${subElementName !== '全般' ? ' > ' + subElementName : ''}`,
+                    tasks: hierarchy[goalName][elementName][subElementName]
+                }))
+            }))
         }));
 
         setGoalGroups(formattedGroups);
@@ -119,17 +153,28 @@ export default function TasksPage() {
 
     // --- 各種操作 ---
 
-    const toggleAccordion = (groupId: string) => {
-        setExpandedGroupIds(prev =>
-            prev.includes(groupId)
-                ? prev.filter(id => id !== groupId)
-                : [...prev, groupId]
+    const toggleGoal = (goalName: string) => {
+        setExpandedGoals(prev =>
+            prev.includes(goalName) ? prev.filter(g => g !== goalName) : [...prev, goalName]
+        );
+    };
+
+    const toggleElement = (goalName: string, elementName: string) => {
+        const key = `${goalName}-${elementName}`;
+        setExpandedElements(prev =>
+            prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+        );
+    };
+
+    const toggleSubElement = (fullTitle: string) => {
+        setExpandedSubElements(prev =>
+            prev.includes(fullTitle) ? prev.filter(ft => ft !== fullTitle) : [...prev, fullTitle]
         );
     };
 
     const openAddModal = () => {
         setEditingTaskId(null);
-        if (goalGroups.length > 0) setSelectedGoalId(goalGroups[0].id);
+        if (goalGroups.length > 0) setSelectedGoalId(goalGroups[0].goalName);
         else setIsCreatingGoal(true);
 
         setIsCreatingGoal(false);
@@ -148,44 +193,54 @@ export default function TasksPage() {
         setIsAddModalOpen(true);
     };
 
-    const toggleTaskCompletion = async (goalId: string, taskId: string) => {
+    const toggleTaskCompletion = async (fullTitle: string, taskId: string) => {
         // 楽観的UI更新
         const currentGroups = [...goalGroups];
         let targetTask: Task | undefined;
         let newIsCompleted = false;
         let groupBecameAllDone = false;
 
-        const newGroups = currentGroups.map(group => {
-            if (group.id !== goalId) return group;
+        const newGroups = currentGroups.map(goalGroup => {
+            return {
+                ...goalGroup,
+                elements: goalGroup.elements.map(elementGroup => {
+                    return {
+                        ...elementGroup,
+                        subElements: elementGroup.subElements.map(subGroup => {
+                            if (subGroup.fullTitle !== fullTitle) return subGroup;
 
-            const updatedTasks = group.tasks.map(task => {
-                if (task.id !== taskId) return task;
-                targetTask = task;
-                newIsCompleted = !task.isCompleted;
-                return {
-                    ...task,
-                    isCompleted: newIsCompleted,
-                    completedDate: newIsCompleted ? new Date().toISOString().split('T')[0] : undefined
-                };
-            });
+                            const updatedTasks = subGroup.tasks.map(task => {
+                                if (task.id !== taskId) return task;
+                                targetTask = task;
+                                newIsCompleted = !task.isCompleted;
+                                return {
+                                    ...task,
+                                    isCompleted: newIsCompleted,
+                                    completedDate: newIsCompleted ? new Date().toISOString().split('T')[0] : undefined
+                                };
+                            });
 
-            const isAllCompleted = updatedTasks.length > 0 && updatedTasks.every(t => t.isCompleted);
-            if (isAllCompleted && !group.tasks.every(t => t.isCompleted)) {
-                groupBecameAllDone = true;
+                            const isAllCompleted = updatedTasks.length > 0 && updatedTasks.every(t => t.isCompleted);
+                            if (isAllCompleted && !subGroup.tasks.every(t => t.isCompleted)) {
+                                groupBecameAllDone = true;
+                            }
+
+                            return { ...subGroup, tasks: updatedTasks };
+                        })
+                    }
+                })
             }
-
-            return { ...group, tasks: updatedTasks };
         });
         setGoalGroups(newGroups);
 
         if (groupBecameAllDone && newIsCompleted) {
-            setCelebratingGroupIds(prev => [...prev, goalId]);
-            if (!expandedGroupIds.includes(goalId)) {
-                setExpandedGroupIds(prev => [...prev, goalId]);
+            setCelebratingGroupIds(prev => [...prev, fullTitle]);
+            if (!expandedSubElements.includes(fullTitle)) {
+                setExpandedSubElements(prev => [...prev, fullTitle]);
             }
         } else {
-            setHiddenGroupIds(prev => prev.filter(id => id !== goalId));
-            setCelebratingGroupIds(prev => prev.filter(id => id !== goalId));
+            setHiddenGroupIds(prev => prev.filter(id => id !== fullTitle));
+            setCelebratingGroupIds(prev => prev.filter(id => id !== fullTitle));
         }
 
         // DB更新
@@ -204,17 +259,23 @@ export default function TasksPage() {
         }
     };
 
-    const deleteTask = async (groupId: string, taskId: string) => {
+    const deleteTask = async (fullTitle: string, taskId: string) => {
         if (!confirm("本当に削除しますか？")) return;
 
         const prevGroups = [...goalGroups];
-        setGoalGroups(prev => prev.map(group => {
-            if (group.id !== groupId) return group;
-            return {
-                ...group,
-                tasks: group.tasks.filter(t => t.id !== taskId)
-            };
-        }));
+        setGoalGroups(prev => prev.map(goalGroup => ({
+            ...goalGroup,
+            elements: goalGroup.elements.map(elGroup => ({
+                ...elGroup,
+                subElements: elGroup.subElements.map(subGroup => {
+                    if (subGroup.fullTitle !== fullTitle) return subGroup;
+                    return {
+                        ...subGroup,
+                        tasks: subGroup.tasks.filter(t => t.id !== taskId)
+                    };
+                })
+            }))
+        })));
 
         const supabase = await createClerkSupabaseClient(getToken);
         const { error } = await supabase.from('tasks').delete().eq('id', taskId);
@@ -291,15 +352,15 @@ export default function TasksPage() {
 
         // 保存後はデータを再取得し、対象のグループを開く
         await fetchTasks();
-        if (!expandedGroupIds.includes(targetGoalTitle)) {
-            setExpandedGroupIds(prev => [...prev, targetGoalTitle]);
+        if (!expandedGoals.includes(targetGoalTitle)) {
+            setExpandedGoals(prev => [...prev, targetGoalTitle]);
         }
         setIsAddModalOpen(false);
     };
 
     // --- 表示状態の判定 ---
-    const hasTodoTasks = goalGroups.some(g => g.tasks.some(t => !t.isCompleted));
-    const hasDoneTasks = goalGroups.some(g => g.tasks.some(t => t.isCompleted));
+    const hasTodoTasks = goalGroups.some(g => g.elements.some(e => e.subElements.some(se => se.tasks.some(t => !t.isCompleted))));
+    const hasDoneTasks = goalGroups.some(g => g.elements.some(e => e.subElements.some(se => se.tasks.some(t => t.isCompleted))));
     const isCelebratingAny = celebratingGroupIds.length > 0;
 
     if (!isLoaded) return <div className="p-10 text-center">Loading...</div>;
@@ -342,123 +403,166 @@ export default function TasksPage() {
                     </div>
                 )}
 
-                {goalGroups.map((group) => {
-                    const visibleTasks = group.tasks.filter(t =>
-                        activeTab === "todo" ? !t.isCompleted : t.isCompleted
-                    );
+                {goalGroups.map((goalGroup) => {
+                    const isGoalExpanded = expandedGoals.includes(goalGroup.goalName);
 
-                    const isCelebrating = celebratingGroupIds.includes(group.id);
-                    const isExpanded = expandedGroupIds.includes(group.id);
+                    // このゴールのタスクがあるかチェック
+                    const goalVisibleTasks = goalGroup.elements.flatMap(e => e.subElements.flatMap(se =>
+                        se.tasks.filter(t => activeTab === "todo" ? !t.isCompleted : t.isCompleted)
+                    ));
 
-                    if (visibleTasks.length === 0 && !isCelebrating) return null;
-                    if (activeTab === "todo" && hiddenGroupIds.includes(group.id) && !isCelebrating) return null;
+                    if (goalVisibleTasks.length === 0) return null;
 
                     return (
-                        <div key={group.id} className="animate-in fade-in slide-in-from-bottom-2 duration-300 border border-gray-100 rounded-xl overflow-hidden shadow-sm bg-white">
+                        <div key={goalGroup.goalName} className="animate-in fade-in slide-in-from-bottom-2 duration-300 border border-gray-100 rounded-xl overflow-hidden shadow-sm bg-white mb-4">
+                            {/* 第1階層: 目標 (Goal) */}
                             <div
-                                onClick={() => toggleAccordion(group.id)}
-                                className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors select-none"
+                                onClick={() => toggleGoal(goalGroup.goalName)}
+                                className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors select-none bg-sky-50/30"
                             >
                                 <div className="flex items-center gap-3">
                                     <div className="w-1 h-8 bg-sky-500 rounded-full" />
-                                    <div className="flex flex-col min-w-0">
-                                        {group.title.includes(": ") ? (
-                                            <>
-                                                <span className="text-[10px] text-sky-500 font-bold uppercase tracking-wider truncate mb-0.5">
-                                                    {group.title.split(": ")[0]}
-                                                </span>
-                                                <h2 className="font-bold text-gray-800 text-sm truncate pr-2">
-                                                    {group.title.split(": ")[1]}
-                                                </h2>
-                                            </>
-                                        ) : (
-                                            <h2 className="font-bold text-gray-800 text-base truncate">{group.title}</h2>
-                                        )}
-                                    </div>
-                                    <span className="text-[10px] text-gray-400 font-bold bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
-                                        {visibleTasks.length}
+                                    <h2 className="font-bold text-gray-800 text-base flex items-center gap-2">
+                                        <Target className="w-4 h-4 text-sky-500" />
+                                        {goalGroup.goalName}
+                                    </h2>
+                                    <span className="text-[10px] text-gray-400 font-bold bg-white px-2 py-0.5 rounded-full border border-gray-100">
+                                        {goalVisibleTasks.length}
                                     </span>
                                 </div>
                                 <div className="text-gray-400">
-                                    {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+                                    {isGoalExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
                                 </div>
                             </div>
 
-                            {isExpanded && (
-                                <div className="px-4 pb-4 space-y-3 bg-gray-50/50 pt-2 border-t border-gray-100">
-                                    {activeTab === "todo" && isCelebrating && (
-                                        <div className="bg-sky-50 border border-sky-100 rounded-xl p-6 text-center animate-pulse mb-3">
-                                            <Trophy className="w-10 h-10 text-yellow-400 mx-auto mb-2" />
-                                            <p className="font-bold text-sky-700">お疲れさまでした！</p>
-                                            <p className="text-xs text-sky-500 mt-1">この目標のタスクは全て完了しました。</p>
-                                        </div>
-                                    )}
+                            {isGoalExpanded && (
+                                <div className="p-4 space-y-4 bg-white border-t border-gray-50">
+                                    {goalGroup.elements.map((elementGroup) => {
+                                        const elKey = `${goalGroup.goalName}-${elementGroup.title}`;
+                                        const isElementExpanded = expandedElements.includes(elKey);
 
-                                    {visibleTasks.map((task) => (
-                                        <div
-                                            key={task.id}
-                                            className={`relative flex items-start gap-3 p-4 rounded-xl border transition-all group ${task.isCompleted
-                                                ? "bg-gray-50 border-gray-100 opacity-80"
-                                                : "bg-white border-gray-100 shadow-sm"
-                                                }`}
-                                        >
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    toggleTaskCompletion(group.id, task.id);
-                                                }}
-                                                className={`flex-shrink-0 mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${task.isCompleted ? "bg-sky-500 border-sky-500" : "bg-white border-gray-300"
-                                                    }`}
-                                            >
-                                                {task.isCompleted && <Check className="w-3.5 h-3.5 text-white" />}
-                                            </button>
+                                        const elementVisibleTasks = elementGroup.subElements.flatMap(se =>
+                                            se.tasks.filter(t => activeTab === "todo" ? !t.isCompleted : t.isCompleted)
+                                        );
 
-                                            <div className="flex-1 min-w-0">
-                                                <p className={`text-sm font-medium leading-relaxed truncate pr-16 ${task.isCompleted ? "text-gray-400 line-through" : "text-gray-800"
-                                                    }`}>
-                                                    {task.title}
-                                                </p>
+                                        if (elementVisibleTasks.length === 0) return null;
 
-                                                <div className="flex items-center gap-4 mt-2">
-                                                    <div className={`flex items-center gap-1 text-xs ${task.isCompleted ? "text-gray-300" : "text-sky-500"
-                                                        }`}>
-                                                        <Calendar className="w-3 h-3" />
-                                                        {/* ★ここが正しく表示されるようになります */}
-                                                        <span>期限: {task.deadline}</span>
+                                        return (
+                                            <div key={elementGroup.title} className="border border-gray-50 rounded-lg overflow-hidden border-l-4 border-l-blue-400">
+                                                {/* 第2階層: 要素 (Element) */}
+                                                <div
+                                                    onClick={() => toggleElement(goalGroup.goalName, elementGroup.title)}
+                                                    className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50 transition-colors bg-gray-50/30"
+                                                >
+                                                    <h3 className="font-bold text-gray-700 text-sm">{elementGroup.title}</h3>
+                                                    <div className="text-gray-400">
+                                                        {isElementExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                                                     </div>
                                                 </div>
 
-                                                {task.isCompleted && task.completedDate && (
-                                                    <div className="text-[10px] text-green-600 font-bold mt-1">
-                                                        完了日: {task.completedDate}
+                                                {isElementExpanded && (
+                                                    <div className="p-3 space-y-3 bg-white">
+                                                        {elementGroup.subElements.map((subGroup) => {
+                                                            const isSubExpanded = expandedSubElements.includes(subGroup.fullTitle);
+                                                            const isCelebrating = celebratingGroupIds.includes(subGroup.fullTitle);
+                                                            const isHidden = activeTab === "todo" && hiddenGroupIds.includes(subGroup.fullTitle) && !isCelebrating;
+
+                                                            const visibleTasks = subGroup.tasks.filter(t =>
+                                                                activeTab === "todo" ? !t.isCompleted : t.isCompleted
+                                                            );
+
+                                                            if ((visibleTasks.length === 0 && !isCelebrating) || isHidden) return null;
+
+                                                            return (
+                                                                <div key={subGroup.title} className="rounded-lg border border-gray-100 overflow-hidden border-l-4 border-l-orange-400">
+                                                                    {/* 第3階層: 中項目 (SubElement) */}
+                                                                    <div
+                                                                        onClick={() => toggleSubElement(subGroup.fullTitle)}
+                                                                        className="flex items-center justify-between p-2.5 cursor-pointer hover:bg-gray-50 transition-colors bg-gray-50/20"
+                                                                    >
+                                                                        <h4 className="font-bold text-gray-600 text-xs">{subGroup.title}</h4>
+                                                                        <div className="text-gray-400 rotate-0">
+                                                                            {isSubExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {isSubExpanded && (
+                                                                        <div className="p-2 space-y-2 bg-gray-50/10">
+                                                                            {activeTab === "todo" && isCelebrating && (
+                                                                                <div className="bg-sky-50 border border-sky-100 rounded-lg p-4 text-center animate-pulse mb-2">
+                                                                                    <Trophy className="w-6 h-6 text-yellow-400 mx-auto mb-1" />
+                                                                                    <p className="text-xs font-bold text-sky-700">お疲れさまでした！</p>
+                                                                                </div>
+                                                                            )}
+
+                                                                            {visibleTasks.map((task) => (
+                                                                                <div
+                                                                                    key={task.id}
+                                                                                    className={`relative flex items-start gap-2 p-3 rounded-lg border transition-all group ${task.isCompleted
+                                                                                        ? "bg-gray-50 border-gray-100 opacity-80"
+                                                                                        : "bg-white border-gray-100 shadow-sm border-l-4 border-l-green-400"
+                                                                                        }`}
+                                                                                >
+                                                                                    <button
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            toggleTaskCompletion(subGroup.fullTitle, task.id);
+                                                                                        }}
+                                                                                        className={`flex-shrink-0 mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${task.isCompleted ? "bg-sky-500 border-sky-500" : "bg-white border-gray-300"
+                                                                                            }`}
+                                                                                    >
+                                                                                        {task.isCompleted && <Check className="w-3 h-3 text-white" />}
+                                                                                    </button>
+
+                                                                                    <div className="flex-1 min-w-0">
+                                                                                        <p className={`text-xs font-bold leading-relaxed truncate pr-16 ${task.isCompleted ? "text-gray-400 line-through" : "text-gray-800"
+                                                                                            }`}>
+                                                                                            {task.title}
+                                                                                        </p>
+
+                                                                                        <div className="flex items-center gap-3 mt-1.5">
+                                                                                            <div className={`flex items-center gap-1 text-[10px] ${task.isCompleted ? "text-gray-300" : "text-sky-500 font-bold"
+                                                                                                }`}>
+                                                                                                <Calendar className="w-3 h-3" />
+                                                                                                <span>{task.deadline}</span>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+
+                                                                                    <div className="absolute right-2 top-2 flex gap-1 group-hover:opacity-100 opacity-0 transition-opacity translate-y-[-2px]">
+                                                                                        {!task.isCompleted && (
+                                                                                            <button
+                                                                                                onClick={(e) => {
+                                                                                                    e.stopPropagation();
+                                                                                                    openEditModal(subGroup.fullTitle, task);
+                                                                                                }}
+                                                                                                className="p-1 text-gray-400 hover:text-sky-500 hover:bg-sky-50 rounded"
+                                                                                            >
+                                                                                                <Pencil className="w-3 h-3" />
+                                                                                            </button>
+                                                                                        )}
+                                                                                        <button
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                deleteTask(subGroup.fullTitle, task.id);
+                                                                                            }}
+                                                                                            className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"
+                                                                                        >
+                                                                                            <X className="w-3 h-3" />
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
                                                     </div>
                                                 )}
                                             </div>
-
-                                            <div className="absolute right-3 top-3 flex gap-2">
-                                                {!task.isCompleted && (
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            openEditModal(group.id, task);
-                                                        }}
-                                                        className="p-1.5 text-gray-400 hover:text-sky-500 hover:bg-sky-50 rounded-lg transition-colors"
-                                                    >
-                                                        <Pencil className="w-4 h-4" />
-                                                    </button>
-                                                )}
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        deleteTask(group.id, task.id);
-                                                    }}
-                                                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                                >
-                                                    <X className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
@@ -522,15 +626,15 @@ export default function TasksPage() {
                                         <div className="max-h-40 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
                                             {goalGroups.map(g => (
                                                 <div
-                                                    key={g.id}
-                                                    onClick={() => setSelectedGoalId(g.id)}
-                                                    className={`p-3 rounded-xl border-2 cursor-pointer transition-all flex items-center justify-center group ${selectedGoalId === g.id
+                                                    key={g.goalName}
+                                                    onClick={() => setSelectedGoalId(g.goalName)}
+                                                    className={`p-3 rounded-xl border-2 cursor-pointer transition-all flex items-center justify-center group ${selectedGoalId === g.goalName
                                                         ? "border-sky-500 bg-sky-50 text-sky-900"
                                                         : "border-gray-100 bg-white text-gray-600 hover:border-gray-300"
                                                         }`}
                                                 >
-                                                    <span className="font-bold text-sm">{g.title}</span>
-                                                    {selectedGoalId === g.id && <Check className="w-4 h-4 text-sky-500" />}
+                                                    <span className="font-bold text-sm">{g.goalName}</span>
+                                                    {selectedGoalId === g.goalName && <Check className="w-4 h-4 text-sky-500" />}
                                                 </div>
                                             ))}
                                         </div>

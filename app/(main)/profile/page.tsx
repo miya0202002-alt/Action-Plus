@@ -22,9 +22,20 @@ interface Task {
     is_completed: boolean;
 }
 
-interface GoalGroup {
+interface SubElementGroup {
     title: string;
+    fullTitle: string;
     tasks: Task[];
+}
+
+interface ElementGroup {
+    title: string;
+    subElements: SubElementGroup[];
+}
+
+interface GoalGroup {
+    goalName: string;
+    elements: ElementGroup[];
 }
 
 interface Profile {
@@ -94,7 +105,9 @@ export default function ProfilePage() {
     const [goalGroups, setGoalGroups] = useState<GoalGroup[]>([]);
     const [posts, setPosts] = useState<Post[]>([]);
     const [streak, setStreak] = useState(0);
-    const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
+    const [expandedGoals, setExpandedGoals] = useState<string[]>([]);
+    const [expandedElements, setExpandedElements] = useState<string[]>([]); // "Goal-Element"
+    const [expandedSubElements, setExpandedSubElements] = useState<string[]>([]); // fullTitle
 
     // UI状態
     const [activeTab, setActiveTab] = useState<TabType>('completed_tasks');
@@ -179,28 +192,61 @@ export default function ProfilePage() {
             const completedOnly = tasksData.filter((t: any) => t.is_completed);
             calculateStreak(completedOnly);
 
-            const groups: { [key: string]: Task[] } = {};
+            // 階層構造の構築
+            const hierarchy: { [goalName: string]: { [elementName: string]: { [subElementName: string]: Task[] } } } = {};
+
             completedOnly.forEach((row: any) => {
-                const groupTitle = row.goal_title || "未分類";
+                const fullTitle = row.goal_title || "未分類";
+
+                let goalName = "未分類";
+                let elementName = "その他";
+                let subElementName = "全般";
+
+                if (fullTitle.includes(": ")) {
+                    const [g, rest] = fullTitle.split(": ");
+                    goalName = g;
+                    if (rest.includes(" > ")) {
+                        const [e, se] = rest.split(" > ");
+                        elementName = e;
+                        subElementName = se;
+                    } else {
+                        elementName = rest;
+                    }
+                } else {
+                    goalName = fullTitle;
+                }
+
                 const task: Task = {
                     id: row.id,
                     title: row.title,
                     completed_at: row.completed_at,
                     created_at: row.created_at,
                     deadline: row.deadline,
-                    goal_title: groupTitle,
+                    goal_title: fullTitle,
                     is_completed: true
                 };
-                if (!groups[groupTitle]) groups[groupTitle] = [];
-                groups[groupTitle].push(task);
+
+                if (!hierarchy[goalName]) hierarchy[goalName] = {};
+                if (!hierarchy[goalName][elementName]) hierarchy[goalName][elementName] = {};
+                if (!hierarchy[goalName][elementName][subElementName]) hierarchy[goalName][elementName][subElementName] = [];
+
+                hierarchy[goalName][elementName][subElementName].push(task);
             });
 
-            const formattedGroups: GoalGroup[] = Object.keys(groups).map(title => ({
-                title: title,
-                tasks: groups[title]
+            const formattedGroups: GoalGroup[] = Object.keys(hierarchy).map(goalName => ({
+                goalName,
+                elements: Object.keys(hierarchy[goalName]).map(elementName => ({
+                    title: elementName,
+                    subElements: Object.keys(hierarchy[goalName][elementName]).map(subElementName => ({
+                        title: subElementName,
+                        fullTitle: `${goalName}: ${elementName}${subElementName !== '全般' ? ' > ' + subElementName : ''}`,
+                        tasks: hierarchy[goalName][elementName][subElementName]
+                    }))
+                }))
             }));
+
             setGoalGroups(formattedGroups);
-            setExpandedGroupIds(formattedGroups.map(g => g.title));
+            setExpandedGoals(formattedGroups.map(g => g.goalName));
         }
 
         // 4. 過去の投稿
@@ -309,9 +355,22 @@ export default function ProfilePage() {
         router.push("/");
     };
 
-    const toggleAccordion = (title: string) => {
-        setExpandedGroupIds(prev =>
-            prev.includes(title) ? prev.filter(t => t !== title) : [...prev, title]
+    const toggleGoal = (goalName: string) => {
+        setExpandedGoals(prev =>
+            prev.includes(goalName) ? prev.filter(g => g !== goalName) : [...prev, goalName]
+        );
+    };
+
+    const toggleElement = (goalName: string, elementName: string) => {
+        const key = `${goalName}-${elementName}`;
+        setExpandedElements(prev =>
+            prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+        );
+    };
+
+    const toggleSubElement = (fullTitle: string) => {
+        setExpandedSubElements(prev =>
+            prev.includes(fullTitle) ? prev.filter(ft => ft !== fullTitle) : [...prev, fullTitle]
         );
     };
 
@@ -445,56 +504,92 @@ export default function ProfilePage() {
 
         return (
             <div className="space-y-4">
-                {goalGroups.map((group) => {
-                    const isExpanded = expandedGroupIds.includes(group.title);
+                {goalGroups.map((goalGroup) => {
+                    const isGoalExpanded = expandedGoals.includes(goalGroup.goalName);
+
                     return (
-                        <div key={group.title} className="border border-gray-100 rounded-xl overflow-hidden shadow-sm bg-white">
+                        <div key={goalGroup.goalName} className="border border-gray-100 rounded-xl overflow-hidden shadow-sm bg-white mb-4">
+                            {/* 第1階層: 目標 (Goal) */}
                             <div
-                                onClick={() => toggleAccordion(group.title)}
-                                className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                                onClick={() => toggleGoal(goalGroup.goalName)}
+                                className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors bg-sky-50/30"
                             >
                                 <div className="flex items-center gap-3">
                                     <div className="w-1 h-8 bg-sky-500 rounded-full" />
-                                    <div className="flex flex-col min-w-0">
-                                        {group.title.includes(": ") ? (
-                                            <>
-                                                <span className="text-[10px] text-sky-500 font-bold uppercase tracking-wider truncate mb-0.5">
-                                                    {group.title.split(": ")[0]}
-                                                </span>
-                                                <h2 className="font-bold text-gray-800 text-sm truncate">
-                                                    {group.title.split(": ")[1]}
-                                                </h2>
-                                            </>
-                                        ) : (
-                                            <h2 className="font-bold text-gray-800 text-base truncate">{group.title}</h2>
-                                        )}
-                                    </div>
-                                    <span className="text-[10px] text-gray-400 font-bold bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
-                                        {group.tasks.length}
-                                    </span>
+                                    <h2 className="font-bold text-gray-800 text-sm flex items-center gap-2">
+                                        <Trophy className="w-4 h-4 text-sky-500" />
+                                        {goalGroup.goalName}
+                                    </h2>
                                 </div>
                                 <div className="text-gray-400">
-                                    {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+                                    {isGoalExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
                                 </div>
                             </div>
 
-                            {isExpanded && (
-                                <div className="px-4 pb-4 space-y-3 bg-gray-50/50 pt-2 border-t border-gray-100">
-                                    {group.tasks.map((task) => (
-                                        <div key={task.id} className="relative flex items-start gap-3 p-4 rounded-xl border bg-gray-50 border-gray-100 opacity-80">
-                                            <div className="flex-shrink-0 mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center bg-sky-500 border-sky-500">
-                                                <Check className="w-3.5 h-3.5 text-white" />
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-medium leading-relaxed truncate pr-4 text-gray-400 line-through">
-                                                    {task.title}
-                                                </p>
-                                                <div className="text-[10px] text-green-600 font-bold mt-1">
-                                                    完了: {formatDate(task.completed_at || task.created_at)}
+                            {isGoalExpanded && (
+                                <div className="p-4 space-y-4 bg-white border-t border-gray-100">
+                                    {goalGroup.elements.map((elementGroup) => {
+                                        const elKey = `${goalGroup.goalName}-${elementGroup.title}`;
+                                        const isElementExpanded = expandedElements.includes(elKey);
+
+                                        return (
+                                            <div key={elementGroup.title} className="border border-gray-50 rounded-lg overflow-hidden border-l-4 border-l-blue-400">
+                                                {/* 第2階層: 要素 (Element) */}
+                                                <div
+                                                    onClick={() => toggleElement(goalGroup.goalName, elementGroup.title)}
+                                                    className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50 transition-colors bg-gray-50/30"
+                                                >
+                                                    <h3 className="font-bold text-gray-700 text-xs">{elementGroup.title}</h3>
+                                                    <div className="text-gray-400">
+                                                        {isElementExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                                                    </div>
                                                 </div>
+
+                                                {isElementExpanded && (
+                                                    <div className="p-3 space-y-3 bg-white">
+                                                        {elementGroup.subElements.map((subGroup) => {
+                                                            const isSubExpanded = expandedSubElements.includes(subGroup.fullTitle);
+
+                                                            return (
+                                                                <div key={subGroup.title} className="rounded-lg border border-gray-100 overflow-hidden border-l-4 border-l-orange-400">
+                                                                    {/* 第3階層: 中項目 (SubElement) */}
+                                                                    <div
+                                                                        onClick={() => toggleSubElement(subGroup.fullTitle)}
+                                                                        className="flex items-center justify-between p-2.5 cursor-pointer hover:bg-gray-50 transition-colors bg-gray-50/20"
+                                                                    >
+                                                                        <h4 className="font-bold text-gray-600 text-[10px]">{subGroup.title}</h4>
+                                                                        <div className="text-gray-400">
+                                                                            {isSubExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {isSubExpanded && (
+                                                                        <div className="p-2 space-y-2 bg-gray-50/10">
+                                                                            {subGroup.tasks.map((task) => (
+                                                                                <div key={task.id} className="relative flex items-start gap-2 p-3 rounded-lg border bg-gray-50 border-gray-100 opacity-80 mb-1 last:mb-0">
+                                                                                    <div className="flex-shrink-0 mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center bg-sky-500 border-sky-500">
+                                                                                        <Check className="w-2.5 h-2.5 text-white" />
+                                                                                    </div>
+                                                                                    <div className="flex-1 min-w-0">
+                                                                                        <p className="text-[11px] font-bold leading-relaxed truncate pr-4 text-gray-400 line-through">
+                                                                                            {task.title}
+                                                                                        </p>
+                                                                                        <div className="text-[9px] text-green-600 font-bold mt-0.5">
+                                                                                            完了: {formatDate(task.completed_at || task.created_at)}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
                                             </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>

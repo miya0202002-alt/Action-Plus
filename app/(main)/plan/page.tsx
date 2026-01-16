@@ -8,7 +8,6 @@ import { useUser, useAuth } from '@clerk/nextjs';
 // --- 型定義 ---
 type TaskItem = {
   title: string;
-  description: string;
   deadline: string;
   priority: "High" | "Medium" | "Low";
   estimatedHours: number;
@@ -210,7 +209,6 @@ export default function PlanPage() {
           subElement.tasks.map((task) => ({
             user_id: user.id,
             title: task.title,
-            description: task.description,
             deadline: new Date(task.deadline).toISOString(),
             is_completed: false,
             estimated_hours: task.estimatedHours,
@@ -386,7 +384,6 @@ export default function PlanPage() {
                                     <p className="text-[11px] font-bold text-gray-700">{task.title}</p>
                                     <span className="text-[9px] text-gray-400">{task.deadline}</span>
                                   </div>
-                                  <p className="text-[10px] text-gray-500 bg-gray-50 p-2 rounded-lg leading-relaxed">{task.description}</p>
                                 </div>
                               ))}
                             </div>
@@ -467,20 +464,12 @@ export default function PlanPage() {
                           <div className="h-px bg-gray-50 mb-1" />
                           {sub.tasks.map((task, tIdx) => (
                             <div key={tIdx} className={`p-3 rounded-xl border border-gray-50 bg-gray-50/30 border-l-4 border-l-green-400`}>
-                              <div className="flex items-center gap-2 mb-2">
+                              <div className="flex items-center gap-2 mb-1">
                                 <input
                                   type="text"
                                   value={task.title}
                                   onChange={(e) => handleTaskChange(eIdx, seIdx, tIdx, "title", e.target.value)}
                                   className="flex-1 font-bold text-gray-800 bg-transparent border-b border-transparent focus:border-sky-500 outline-none text-xs py-0.5"
-                                />
-                              </div>
-                              <div className="mb-2">
-                                <textarea
-                                  value={task.description}
-                                  onChange={(e) => handleTaskChange(eIdx, seIdx, tIdx, "description", e.target.value)}
-                                  className="w-full text-[10px] text-gray-500 bg-white p-2 rounded-lg outline-none resize-none border border-gray-100 leading-relaxed"
-                                  rows={2}
                                 />
                               </div>
                               <div className="flex items-center justify-between text-[10px]">
