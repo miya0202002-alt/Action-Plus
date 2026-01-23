@@ -368,17 +368,28 @@ export default function HomePage() {
                 .from('likes')
                 .insert({ user_id: myProfile.id, post_id: postId });
 
-            // 通知
+            // 通知 (重複防止)
             if (targetPost.user_id !== myProfile.id) {
-                await supabase.from('notifications').insert({
-                    id: crypto.randomUUID(),
-                    user_id: targetPost.user_id,
-                    actor_id: myProfile.id,
-                    type: 'like',
-                    content: targetPost.content || "画像投稿",
-                    link_id: String(postId),
-                    is_read: false
-                });
+                const { data: existingNotif } = await supabase
+                    .from('notifications')
+                    .select('id')
+                    .eq('user_id', targetPost.user_id)
+                    .eq('actor_id', myProfile.id)
+                    .eq('type', 'like')
+                    .eq('link_id', String(postId))
+                    .limit(1);
+
+                if (!existingNotif || existingNotif.length === 0) {
+                    await supabase.from('notifications').insert({
+                        id: crypto.randomUUID(),
+                        user_id: targetPost.user_id,
+                        actor_id: myProfile.id,
+                        type: 'like',
+                        content: targetPost.content || "画像投稿",
+                        link_id: String(postId),
+                        is_read: false
+                    });
+                }
             }
         }
     };
@@ -421,16 +432,29 @@ export default function HomePage() {
                 p.id === selectedPost.id ? { ...p, comment_count: p.comment_count + 1 } : p
             ));
 
+            // 通知 (コメントは重複を許容するのが一般的だが、念のため同じ投稿・同じ内容の連投は抑制)
             if (selectedPost.user_id !== myProfile.id) {
-                await supabase.from('notifications').insert({
-                    id: crypto.randomUUID(),
-                    user_id: selectedPost.user_id,
-                    actor_id: myProfile.id,
-                    type: 'comment',
-                    content: newComment,
-                    link_id: String(selectedPost.id),
-                    is_read: false
-                });
+                const { data: existingNotif } = await supabase
+                    .from('notifications')
+                    .select('id')
+                    .eq('user_id', selectedPost.user_id)
+                    .eq('actor_id', myProfile.id)
+                    .eq('type', 'comment')
+                    .eq('content', newComment)
+                    .eq('link_id', String(selectedPost.id))
+                    .limit(1);
+
+                if (!existingNotif || existingNotif.length === 0) {
+                    await supabase.from('notifications').insert({
+                        id: crypto.randomUUID(),
+                        user_id: selectedPost.user_id,
+                        actor_id: myProfile.id,
+                        type: 'comment',
+                        content: newComment,
+                        link_id: String(selectedPost.id),
+                        is_read: false
+                    });
+                }
             }
         }
         setIsSendingComment(false);
@@ -730,6 +754,7 @@ export default function HomePage() {
                                         onChange={(e) => setNewPostContent(e.target.value)}
                                         placeholder={selectedTask ? "達成の感想を一言！(任意)" : "いまどうしてる？"}
                                         className="w-full text-lg resize-none focus:outline-none placeholder-gray-400 min-h-[80px] flex-shrink-0"
+                                        maxLength={200}
                                     />
 
                                     {selectedTask && (

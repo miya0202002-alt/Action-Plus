@@ -841,12 +841,14 @@ export default function ProfilePage() {
                                     onChange={(e) => setEditForm({ ...editForm, goal: e.target.value })}
                                     className="w-full border border-orange-100 bg-orange-50 rounded-lg p-2 text-center font-bold text-orange-700"
                                     placeholder="目標"
+                                    maxLength={20}
                                 />
                                 <textarea
                                     value={editForm.bio}
                                     onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })}
                                     className="w-full border border-gray-200 rounded-lg p-2 text-sm resize-none"
                                     placeholder="自己紹介"
+                                    maxLength={100}
                                 />
                                 <div className="flex gap-2 justify-center pt-2">
                                     <button onClick={() => setIsEditing(false)} className="flex-1 py-2 px-4 rounded-lg bg-gray-100 font-bold text-sm">キャンセル</button>

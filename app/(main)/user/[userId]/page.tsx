@@ -135,6 +135,26 @@ export default function UserProfilePage() {
             if (!error) {
                 setIsFollowing(true);
                 setFollowerCount(prev => prev + 1);
+
+                // 通知の送出 (重複防止)
+                const { data: existingNotif } = await supabase
+                    .from('notifications')
+                    .select('id')
+                    .eq('user_id', profile.id)
+                    .eq('actor_id', currentUser.id)
+                    .eq('type', 'follow')
+                    .limit(1);
+
+                if (!existingNotif || existingNotif.length === 0) {
+                    await supabase.from('notifications').insert({
+                        id: crypto.randomUUID(),
+                        user_id: profile.id,
+                        actor_id: currentUser.id,
+                        type: 'follow',
+                        content: `${currentUser.fullName || currentUser.username || "誰か"}さんにフォローされました`,
+                        is_read: false
+                    });
+                }
             }
         }
 
@@ -224,8 +244,8 @@ export default function UserProfilePage() {
                                     onClick={handleToggleFollow}
                                     disabled={isFollowActionLoading}
                                     className={`mb-4 flex items-center gap-2 px-6 py-2 rounded-full font-bold text-sm transition-all duration-200 shadow-sm ${isFollowing
-                                            ? 'bg-gray-100 text-gray-600 hover:bg-red-50 hover:text-red-500 border border-gray-200'
-                                            : 'bg-sky-500 text-white hover:bg-sky-600 shadow-sky-200'
+                                        ? 'bg-gray-100 text-gray-600 hover:bg-red-50 hover:text-red-500 border border-gray-200'
+                                        : 'bg-sky-500 text-white hover:bg-sky-600 shadow-sky-200'
                                         } disabled:opacity-50`}
                                 >
                                     {isFollowing ? (

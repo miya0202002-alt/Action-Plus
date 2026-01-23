@@ -291,7 +291,7 @@ export default function PlanPage() {
           <div className="space-y-6">
             <div className="space-y-2">
               <label className="text-sm font-bold text-gray-700">目標 <span className="text-red-500">*</span></label>
-              <input type="text" value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="例：3ヶ月で英語を話せるようになる" className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-900 focus:ring-2 focus:ring-sky-200 outline-none transition-all" />
+              <input type="text" value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="例：3ヶ月で英語を話せるようになる" className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-900 focus:ring-2 focus:ring-sky-200 outline-none transition-all" maxLength={50} />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
