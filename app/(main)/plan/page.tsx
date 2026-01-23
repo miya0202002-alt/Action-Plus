@@ -46,7 +46,7 @@ export default function PlanPage() {
   // アプリ状態
   const [isLoading, setIsLoading] = useState(false);
   const [roadmap, setRoadmap] = useState<ElementItem[] | null>(null);
-  const [expandedElements, setExpandedElements] = useState<number[]>([]);
+  const [expandedElements, setExpandedElements] = useState<string[]>([]);
   const [expandedSubElements, setExpandedSubElements] = useState<string[]>([]); // "elementIdx-subElementIdx"
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -188,16 +188,17 @@ export default function PlanPage() {
     setRoadmap(newRoadmap);
   };
 
-  const toggleSubElement = (eIdx: number, seIdx: number) => {
-    const key = `${eIdx}-${seIdx}`;
-    setExpandedSubElements(prev =>
+  const toggleElement = (typeOrIdx: string, historyIdx?: string) => {
+    const key = historyIdx ? `history-${historyIdx}` : typeOrIdx;
+    setExpandedElements(prev =>
       prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
     );
   };
 
-  const toggleElement = (index: number) => {
-    setExpandedElements(prev =>
-      prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
+  const toggleSubElement = (keyOrEIdx: string | number, seIdx?: number) => {
+    const key = typeof keyOrEIdx === 'string' && seIdx === undefined ? keyOrEIdx : `${keyOrEIdx}-${seIdx}`;
+    setExpandedSubElements(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
     );
   };
 
@@ -487,7 +488,7 @@ export default function PlanPage() {
             <div key={eIdx} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden text-sm border-l-4 border-l-sky-500">
               <div className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
                 <button
-                  onClick={() => toggleElement(eIdx)}
+                  onClick={() => toggleElement(eIdx.toString())}
                   className="flex-1 flex items-center gap-3 text-left"
                 >
                   <h3 className="font-bold text-gray-800 truncate">{element.elementTitle}</h3>
@@ -500,8 +501,8 @@ export default function PlanPage() {
                   >
                     <X className="w-4 h-4" />
                   </button>
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border ${expandedElements.includes(eIdx) ? 'border-sky-500 bg-sky-50' : 'border-gray-200'}`}>
-                    {expandedElements.includes(eIdx) ? (
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border ${expandedElements.includes(eIdx.toString()) ? 'border-sky-500 bg-sky-50' : 'border-gray-200'}`}>
+                    {expandedElements.includes(eIdx.toString()) ? (
                       <span className="text-sky-500 font-bold text-lg leading-none mt-[-2px]">-</span>
                     ) : (
                       <span className="text-gray-400 font-bold text-lg leading-none mt-[-1px]">+</span>
