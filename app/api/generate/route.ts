@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     const genAI = new GoogleGenerativeAI(apiKey);
     // モデル設定
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash-lite",
+      model: "gemini-2.5-flash",
       generationConfig: { responseMimeType: "application/json" }
     });
 
@@ -80,8 +80,30 @@ export async function POST(req: Request) {
       ]
     `;
 
-    // AI生成実行
-    const result = await model.generateContent(prompt);
+    // AI生成実行 (リトライロジックを追加)
+    let result;
+    let lastError;
+    const maxRetries = 5;
+
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        result = await model.generateContent(prompt);
+        if (result) break;
+      } catch (error: any) {
+        lastError = error;
+        // 503 (Overloaded) や 429 (Rate Limit) の場合のみリトライ
+        if (error.message?.includes("503") || error.message?.includes("overloaded") || error.message?.includes("429")) {
+          const delay = Math.pow(2, i) * 1500; // 少し長めの指数バックオフ
+          console.log(`AI Busy/Overloaded. Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        throw error; // 他のエラーはそのまま投げる
+      }
+    }
+
+    if (!result) throw lastError;
+
     const response = await result.response;
     const text = response.text();
 
@@ -106,6 +128,10 @@ export async function POST(req: Request) {
 
   } catch (error: any) {
     console.error("Server Error:", error);
-    return NextResponse.json({ error: "サーバーエラーが発生しました" }, { status: 500 });
+    return NextResponse.json({
+      error: "サーバーエラーが発生しました",
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    }, { status: 500 });
   }
 }

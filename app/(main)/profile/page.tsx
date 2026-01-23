@@ -614,7 +614,7 @@ export default function ProfilePage() {
                                                                     {isSubExpanded && (
                                                                         <div className="p-2 space-y-2 bg-gray-50/10">
                                                                             {subGroup.tasks.map((task) => (
-                                                                                <div key={task.id} className="relative flex items-start gap-2 p-3 rounded-lg border bg-gray-50 border-gray-100 opacity-80 mb-1 last:mb-0 group">
+                                                                                <div key={task.id} className="relative flex items-start gap-2 p-3 rounded-lg border border-l-4 border-l-emerald-400 bg-gray-50 border-gray-100 opacity-80 mb-1 last:mb-0 group">
                                                                                     <button
                                                                                         onClick={() => deleteCompletedTask(task.id)}
                                                                                         className="absolute top-2 right-2 p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-opacity"
@@ -841,14 +841,12 @@ export default function ProfilePage() {
                                     onChange={(e) => setEditForm({ ...editForm, goal: e.target.value })}
                                     className="w-full border border-orange-100 bg-orange-50 rounded-lg p-2 text-center font-bold text-orange-700"
                                     placeholder="目標"
-                                    maxLength={20}
                                 />
                                 <textarea
                                     value={editForm.bio}
                                     onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })}
                                     className="w-full border border-gray-200 rounded-lg p-2 text-sm resize-none"
                                     placeholder="自己紹介"
-                                    maxLength={100}
                                 />
                                 <div className="flex gap-2 justify-center pt-2">
                                     <button onClick={() => setIsEditing(false)} className="flex-1 py-2 px-4 rounded-lg bg-gray-100 font-bold text-sm">キャンセル</button>

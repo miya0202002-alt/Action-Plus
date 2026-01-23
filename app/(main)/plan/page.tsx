@@ -125,10 +125,13 @@ export default function PlanPage() {
         body: JSON.stringify({ goal, targetDate, currentLevel, studyHours: studyHoursStr }),
       });
 
-      if (!res.ok) throw new Error("AIサーバーとの通信に失敗しました");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.details || errorData.error || "AIサーバーとの通信に失敗しました");
+      }
 
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (data.error) throw new Error(data.details || data.error);
 
       const generatedRoadmap = (data.roadmap || []) as ElementItem[];
       setRoadmap(generatedRoadmap);
@@ -151,7 +154,11 @@ export default function PlanPage() {
 
     } catch (error: any) {
       console.error("エラー:", error);
-      setErrorMsg("計画の作成に失敗しました。");
+      if (error.message?.includes("503") || error.message?.includes("overloaded")) {
+        setErrorMsg("AIが現在混み合っています。数分後にもう一度お試しください。");
+      } else {
+        setErrorMsg("計画の作成に失敗しました。");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -291,7 +298,7 @@ export default function PlanPage() {
           <div className="space-y-6">
             <div className="space-y-2">
               <label className="text-sm font-bold text-gray-700">目標 <span className="text-red-500">*</span></label>
-              <input type="text" value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="例：3ヶ月で英語を話せるようになる" className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-900 focus:ring-2 focus:ring-sky-200 outline-none transition-all" maxLength={50} />
+              <input type="text" value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="例：3ヶ月で英語を話せるようになる" className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-900 focus:ring-2 focus:ring-sky-200 outline-none transition-all" />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
