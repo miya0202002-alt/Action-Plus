@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Loader2, Sparkles, Network, Calendar, Clock, CheckCircle2, AlertCircle, Save, History, FileText, X, ChevronRight } from "lucide-react";
+import { Loader2, Sparkles, Network, Calendar, Clock, CheckCircle2, AlertCircle, Save, History, FileText, X, ChevronRight, ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 import { useUser, useAuth } from '@clerk/nextjs';
