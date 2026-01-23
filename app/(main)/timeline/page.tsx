@@ -97,12 +97,12 @@ export default function HomePage() {
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isPosting, setIsPosting] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
 
     const [selectedPost, setSelectedPost] = useState<Post | null>(null);
     const [comments, setComments] = useState<Comment[]>([]);
     const [newComment, setNewComment] = useState("");
     const [isSendingComment, setIsSendingComment] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
 
     // ▼▼▼ 追加: 通知関連の状態 ▼▼▼
     const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -265,35 +265,42 @@ export default function HomePage() {
         const myLikedPostIds = new Set(myLikesData ? myLikesData.map((l: any) => l.post_id) : []);
 
         // 4. 投稿一覧取得
-        const { data: postsData, error: postsError } = await supabase
-            .from('posts')
-            .select('*, profiles(id, name, avatar_url, goal), tasks(id, title)')
-            .order('created_at', { ascending: false });
+        try {
+            const { data: postsData, error: postsError } = await supabase
+                .from('posts')
+                .select('*, profiles(id, name, avatar_url, goal), tasks(id, title)')
+                .order('created_at', { ascending: false });
 
-        if (postsError) console.error('投稿取得エラー:', postsError);
+            if (postsError) console.error('投稿取得エラー:', postsError);
 
-        if (postsData) {
-            const formattedPosts = await Promise.all(
-                postsData.map(async (p: any) => {
-                    const { count: likeCount } = await supabase
-                        .from('likes')
-                        .select('*', { count: 'exact', head: true })
-                        .eq('post_id', p.id);
+            if (postsData) {
+                const formattedPosts = await Promise.all(
+                    postsData.map(async (p: any) => {
+                        const { count: likeCount } = await supabase
+                            .from('likes')
+                            .select('*', { count: 'exact', head: true })
+                            .eq('post_id', p.id);
 
-                    const { count: commentCount } = await supabase
-                        .from('comments')
-                        .select('*', { count: 'exact', head: true })
-                        .eq('post_id', p.id);
+                        const { count: commentCount } = await supabase
+                            .from('comments')
+                            .select('*', { count: 'exact', head: true })
+                            .eq('post_id', p.id);
 
-                    return {
-                        ...p,
-                        like_count: likeCount || 0,
-                        comment_count: commentCount || 0,
-                        has_liked: myLikedPostIds.has(p.id)
-                    };
-                })
-            );
-            setPosts(formattedPosts);
+                        return {
+                            ...p,
+                            like_count: likeCount || 0,
+                            comment_count: commentCount || 0,
+                            has_liked: myLikedPostIds.has(p.id)
+                        };
+                    })
+                );
+                setPosts(formattedPosts);
+            }
+        } catch (error) {
+            console.error('Error fetching posts:', error);
+            setPosts([]);
+        } finally {
+            setIsLoading(false);
         }
 
         // 5. 完了タスク
@@ -440,7 +447,6 @@ export default function HomePage() {
         const insertData: any = {
             user_id: myProfile.id,
             content: newPostContent,
-            task_id: selectedTask ? selectedTask.id : null,
             task_snapshot: selectedTask ? { id: selectedTask.id, title: selectedTask.title } : null
         };
 
@@ -517,67 +523,12 @@ export default function HomePage() {
                     </div>
 
                     {/* 通知アイコン */}
-                    <div className="relative">
-                        <button
-                            className="p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors relative"
-                            onClick={() => setIsNotifDropdownOpen(!isNotifDropdownOpen)}
-                        >
-                            <Bell className="w-6 h-6" />
-                            {unreadCount > 0 && (
-                                <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border border-white" />
-                            )}
-                        </button>
-
-                        {/* 通知ドロップダウン */}
-                        {isNotifDropdownOpen && (
-                            <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                                <div className="p-3 border-b border-gray-100 flex justify-between items-center">
-                                    <h3 className="font-bold text-sm text-gray-700">通知</h3>
-                                    {unreadCount > 0 && <span className="text-xs text-sky-500 font-bold">{unreadCount}件の未読</span>}
-                                </div>
-                                <div className="max-h-96 overflow-y-auto">
-                                    {notifications.length > 0 ? (
-                                        notifications.map((notif) => (
-                                            <button
-                                                key={notif.id}
-                                                onClick={() => handleNotificationClick(notif)}
-                                                className={`w-full text-left p-3 flex gap-3 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0 ${!notif.is_read ? 'bg-sky-50/50' : ''}`}
-                                            >
-                                                <div className="flex-shrink-0">
-                                                    <img
-                                                        src={notif.actor?.avatar_url || "https://api.dicebear.com/7.x/avataaars/svg?seed=Guest"}
-                                                        className="w-10 h-10 rounded-full border border-gray-100"
-                                                    />
-                                                    <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5">
-                                                        {notif.type === 'like' && <Heart className="w-4 h-4 text-pink-500 fill-current" />}
-                                                        {notif.type === 'comment' && <MessageCircle className="w-4 h-4 text-sky-500 fill-current" />}
-                                                        {(notif.type === 'followed_post' || notif.type === 'followed_task_complete') && <Plus className="w-4 h-4 text-emerald-500" />}
-                                                    </div>
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-sm text-gray-800 line-clamp-2">
-                                                        <span className="font-bold">{notif.actor?.name}</span>
-                                                        {notif.type === 'like' && "さんがあなたの投稿にいいねしました"}
-                                                        {notif.type === 'comment' && "さんがコメントしました"}
-                                                        {notif.type === 'followed_post' && "さんが新しい投稿をしました"}
-                                                        {notif.type === 'followed_task_complete' && "さんがタスクを達成しました！"}
-                                                    </p>
-                                                    <p className="text-xs text-gray-400 mt-1">{getRelativeTime(notif.created_at)}</p>
-                                                </div>
-                                                {!notif.is_read && <div className="w-2 h-2 bg-sky-500 rounded-full flex-shrink-0 mt-2" />}
-                                            </button>
-                                        ))
-                                    ) : (
-                                        <div className="p-8 text-center text-gray-400 text-sm">通知はありません</div>
-                                    )}
-                                </div>
-                            </div>
+                    <Link href="/notifications" className="relative p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors">
+                        <Bell className="w-6 h-6" />
+                        {unreadCount > 0 && (
+                            <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border border-white" />
                         )}
-                        {/* クリック時にメニューを閉じるための背景オーバーレイ */}
-                        {isNotifDropdownOpen && (
-                            <div className="fixed inset-0 z-40 bg-transparent" onClick={() => setIsNotifDropdownOpen(false)} />
-                        )}
-                    </div>
+                    </Link>
                 </div>
 
                 <div className="flex w-full">
@@ -602,129 +553,152 @@ export default function HomePage() {
 
             {/* === タイムライン === */}
             <div className="max-w-xl mx-auto">
-                {displayedPosts.map((post) => {
-                    const taskTitle = post.task_snapshot?.title || post.tasks?.title;
-                    const hasTask = !!taskTitle;
-
-                    return (
-                        <article
-                            key={post.id}
-                            onClick={() => handlePostClick(post)}
-                            className="bg-white p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors relative"
-                        >
-                            <div className="flex gap-3">
-                                <Link href={user && post.user_id === user.id ? "/profile" : `/user/${post.user_id}`} onClick={(e) => e.stopPropagation()} className="flex-shrink-0">
-                                    <img
-                                        src={post.profiles?.avatar_url || "https://api.dicebear.com/7.x/avataaars/svg?seed=Guest"}
-                                        alt="avatar"
-                                        className="w-10 h-10 rounded-full border border-gray-100 object-cover"
-                                    />
-                                </Link>
-
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-1.5 min-w-0">
-                                            <Link
-                                                href={user && post.user_id === user.id ? "/profile" : `/user/${post.user_id}`}
-                                                onClick={(e) => e.stopPropagation()}
-                                                className="flex items-center gap-1.5 truncate hover:opacity-70 transition-opacity"
-                                            >
-                                                <span className="font-bold text-gray-900 text-sm truncate">{post.profiles?.name}</span>
-                                                <span className="text-gray-500 text-sm truncate">@{post.profiles?.id?.slice(0, 8)}</span>
-                                            </Link>
-                                            <span className="text-gray-400 text-xs flex-shrink-0">· {getRelativeTime(post.created_at)}</span>
-                                        </div>
-
-                                        <div className="relative">
-                                            <button
-                                                className="text-gray-400 hover:text-sky-500 rounded-full p-1 hover:bg-sky-50 transition-colors"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setOpenMenuPostId(openMenuPostId === post.id ? null : post.id);
-                                                }}
-                                            >
-                                                <MoreHorizontal className="w-4 h-4" />
-                                            </button>
-
-                                            {openMenuPostId === post.id && post.user_id === myProfile?.id && (
-                                                <div className="absolute right-0 top-full bg-white shadow-lg border border-gray-100 rounded-lg z-10 w-24 overflow-hidden">
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); deletePost(post.id); }}
-                                                        className="flex items-center gap-2 w-full text-left px-3 py-2 text-xs text-red-500 hover:bg-red-50"
-                                                    >
-                                                        <Trash2 className="w-3 h-3" />
-                                                        削除
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <p className="mt-1 text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">{post.content}</p>
-
-                                    {hasTask && (
-                                        <div className="mt-2 border border-gray-200 rounded-xl p-3 bg-white flex items-start gap-3 hover:bg-gray-50 transition-colors">
-                                            <div className="p-2 bg-emerald-100 text-emerald-600 rounded-full flex-shrink-0">
-                                                <CheckCircle2 className="w-5 h-5" />
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="text-xs text-gray-500 mb-0.5">タスクを完了しました</div>
-                                                <div className="text-sm font-bold text-gray-900 truncate">{taskTitle}</div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {post.image_url && (
-                                        <div className="mt-3 rounded-xl overflow-hidden border border-gray-200">
-                                            <img src={post.image_url} alt="post" className="w-full h-auto object-cover max-h-96" />
-                                        </div>
-                                    )}
-
-                                    <div className="flex items-center justify-between mt-3 max-w-xs pr-4">
-                                        <button
-                                            className="group flex items-center gap-1.5 text-gray-500 hover:text-sky-500 transition-colors"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handlePostClick(post);
-                                            }}
-                                        >
-                                            <div className="p-2 rounded-full group-hover:bg-sky-50">
-                                                <MessageCircle className="w-4.5 h-4.5" />
-                                            </div>
-                                            <span className="text-xs group-hover:text-sky-500">{post.comment_count > 0 && post.comment_count}</span>
-                                        </button>
-
-                                        <button
-                                            onClick={(e) => toggleLike(post.id, e)}
-                                            className={`group flex items-center gap-1.5 transition-colors ${post.has_liked ? 'text-pink-600' : 'text-gray-500 hover:text-pink-600'
-                                                }`}
-                                        >
-                                            <div className={`p-2 rounded-full group-hover:bg-pink-50`}>
-                                                <Heart className={`w-4.5 h-4.5 ${post.has_liked ? 'fill-current' : ''}`} />
-                                            </div>
-                                            <span className="text-xs">{post.like_count > 0 && post.like_count}</span>
-                                        </button>
-
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleShare(post.id); }}
-                                            className="group flex items-center gap-1.5 text-gray-500 hover:text-green-500 transition-colors"
-                                        >
-                                            <div className="p-2 rounded-full group-hover:bg-green-50">
-                                                <Share2 className="w-4.5 h-4.5" />
-                                            </div>
-                                        </button>
+                {isLoading ? (
+                    // スケルトンローディング
+                    <div className="space-y-4 mb-24">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                            <div key={i} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm animate-pulse">
+                                <div className="flex items-center gap-3 mb-3">
+                                    <div className="w-10 h-10 bg-gray-200 rounded-full" />
+                                    <div className="space-y-2 flex-1">
+                                        <div className="h-4 bg-gray-200 rounded w-1/3" />
+                                        <div className="h-3 bg-gray-200 rounded w-1/4" />
                                     </div>
                                 </div>
+                                <div className="space-y-2">
+                                    <div className="h-4 bg-gray-200 rounded w-3/4" />
+                                    <div className="h-4 bg-gray-200 rounded w-1/2" />
+                                </div>
+                                <div className="mt-4 h-48 bg-gray-200 rounded-lg" />
                             </div>
-                        </article>
-                    );
-                })}
-
-                {displayedPosts.length === 0 && (
-                    <div className="text-center py-20 text-gray-400 text-sm">
-                        まだ投稿がありません
+                        ))}
                     </div>
-                )}
+                ) : displayedPosts.length === 0 ? (
+                    <div className="bg-white p-8 rounded-2xl shadow-sm text-center border border-gray-100 py-12">
+                        <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <MessageCircle className="w-8 h-8 text-gray-300" />
+                        </div>
+                        <h3 className="font-bold text-gray-800 mb-1">まだ投稿がありません</h3>
+                        <p className="text-gray-400 text-sm">最初の投稿をして、<br />あなたの目標を共有しましょう！</p>
+                    </div>
+                ) : (
+                    displayedPosts.map((post) => {
+                        const taskTitle = post.task_snapshot?.title || post.tasks?.title;
+                        const hasTask = !!taskTitle;
+
+                        return (
+                            <article
+                                key={post.id}
+                                onClick={() => handlePostClick(post)}
+                                className="bg-white p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors relative"
+                            >
+                                <div className="flex gap-3">
+                                    <Link href={user && post.user_id === user.id ? "/profile" : `/user/${post.user_id}`} onClick={(e) => e.stopPropagation()} className="flex-shrink-0">
+                                        <img
+                                            src={post.profiles?.avatar_url || "https://api.dicebear.com/7.x/avataaars/svg?seed=Guest"}
+                                            alt="avatar"
+                                            className="w-10 h-10 rounded-full border border-gray-100 object-cover"
+                                        />
+                                    </Link>
+
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                                <Link
+                                                    href={user && post.user_id === user.id ? "/profile" : `/user/${post.user_id}`}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="flex items-center gap-1.5 truncate hover:opacity-70 transition-opacity"
+                                                >
+                                                    <span className="font-bold text-gray-900 text-sm truncate">{post.profiles?.name}</span>
+                                                    <span className="text-gray-500 text-sm truncate">@{post.profiles?.id?.slice(0, 8)}</span>
+                                                </Link>
+                                                <span className="text-gray-400 text-xs flex-shrink-0">· {getRelativeTime(post.created_at)}</span>
+                                            </div>
+
+                                            <div className="relative">
+                                                <button
+                                                    className="text-gray-400 hover:text-sky-500 rounded-full p-1 hover:bg-sky-50 transition-colors"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setOpenMenuPostId(openMenuPostId === post.id ? null : post.id);
+                                                    }}
+                                                >
+                                                    <MoreHorizontal className="w-4 h-4" />
+                                                </button>
+
+                                                {openMenuPostId === post.id && post.user_id === myProfile?.id && (
+                                                    <div className="absolute right-0 top-full bg-white shadow-lg border border-gray-100 rounded-lg z-10 w-24 overflow-hidden">
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); deletePost(post.id); }}
+                                                            className="flex items-center gap-2 w-full text-left px-3 py-2 text-xs text-red-500 hover:bg-red-50"
+                                                        >
+                                                            <Trash2 className="w-3 h-3" />
+                                                            削除
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <p className="mt-1 text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">{post.content}</p>
+
+                                        {hasTask && (
+                                            <div className="mt-2 border border-gray-200 rounded-xl p-3 bg-white flex items-start gap-3 hover:bg-gray-50 transition-colors">
+                                                <div className="p-2 bg-emerald-100 text-emerald-600 rounded-full flex-shrink-0">
+                                                    <CheckCircle2 className="w-5 h-5" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-xs text-gray-500 mb-0.5">タスクを完了しました</div>
+                                                    <div className="text-sm font-bold text-gray-900 truncate">{taskTitle}</div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {post.image_url && (
+                                            <div className="mt-3 rounded-xl overflow-hidden border border-gray-200">
+                                                <img src={post.image_url} alt="post" className="w-full h-auto object-cover max-h-96" />
+                                            </div>
+                                        )}
+
+                                        <div className="flex items-center justify-between mt-3 max-w-xs pr-4">
+                                            <button
+                                                className="group flex items-center gap-1.5 text-gray-500 hover:text-sky-500 transition-colors"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handlePostClick(post);
+                                                }}
+                                            >
+                                                <div className="p-2 rounded-full group-hover:bg-sky-50">
+                                                    <MessageCircle className="w-4.5 h-4.5" />
+                                                </div>
+                                                <span className="text-xs group-hover:text-sky-500">{post.comment_count > 0 && post.comment_count}</span>
+                                            </button>
+
+                                            <button
+                                                onClick={(e) => toggleLike(post.id, e)}
+                                                className={`group flex items-center gap-1.5 transition-colors ${post.has_liked ? 'text-pink-600' : 'text-gray-500 hover:text-pink-600'
+                                                    }`}
+                                            >
+                                                <div className={`p-2 rounded-full group-hover:bg-pink-50`}>
+                                                    <Heart className={`w-4.5 h-4.5 ${post.has_liked ? 'fill-current' : ''}`} />
+                                                </div>
+                                                <span className="text-xs">{post.like_count > 0 && post.like_count}</span>
+                                            </button>
+
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleShare(post.id); }}
+                                                className="group flex items-center gap-1.5 text-gray-500 hover:text-green-500 transition-colors"
+                                            >
+                                                <div className="p-2 rounded-full group-hover:bg-green-50">
+                                                    <Share2 className="w-4.5 h-4.5" />
+                                                </div>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </article>
+                        );
+                    }))}
             </div>
 
             {/* === FAB === */}

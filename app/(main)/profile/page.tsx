@@ -132,6 +132,11 @@ export default function ProfilePage() {
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    // フォロー・フォロワーモーダル用
+    const [isFollowModalOpen, setIsFollowModalOpen] = useState(false);
+    const [followModalType, setFollowModalType] = useState<'following' | 'followers'>('following');
+    const [followList, setFollowList] = useState<Profile[]>([]);
+
     const [editForm, setEditForm] = useState({
         name: '',
         bio: '',
@@ -309,6 +314,38 @@ export default function ProfilePage() {
         setStreak(currentStreak);
     };
 
+    const fetchFollowList = async (type: 'following' | 'followers') => {
+        if (!user) return;
+        const supabase = await createClerkSupabaseClient(getToken);
+
+        if (type === 'following') {
+            const { data } = await supabase
+                .from('follows')
+                .select('following_id, profiles!follows_following_id_fkey(*)')
+                .eq('follower_id', user.id);
+
+            if (data) {
+                setFollowList(data.map((f: any) => f.profiles).filter(Boolean));
+            }
+        } else {
+            const { data } = await supabase
+                .from('follows')
+                .select('follower_id, profiles!follows_follower_id_fkey(*)')
+                .eq('following_id', user.id);
+
+            if (data) {
+                setFollowList(data.map((f: any) => f.profiles).filter(Boolean));
+            }
+        }
+    };
+
+    const openFollowModal = async (type: 'following' | 'followers') => {
+        setFollowModalType(type);
+        setIsFollowModalOpen(true);
+        setFollowList([]);
+        await fetchFollowList(type);
+    };
+
     const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         if (!event.target.files || event.target.files.length === 0 || !user) return;
         const file = event.target.files[0];
@@ -354,6 +391,17 @@ export default function ProfilePage() {
     const handleSignOut = async () => {
         await signOut();
         router.push("/");
+    };
+
+    const deleteCompletedTask = async (taskId: string) => {
+        if (!confirm('この完了タスクを削除しますか?')) return;
+        const supabase = await createClerkSupabaseClient(getToken);
+        const { error } = await supabase.from('tasks').delete().eq('id', taskId);
+        if (!error && user) {
+            fetchProfileData(user.id);
+        } else {
+            alert('削除に失敗しました');
+        }
     };
 
     const toggleGoal = (goalName: string) => {
@@ -516,7 +564,7 @@ export default function ProfilePage() {
                                 className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors bg-sky-50/30"
                             >
                                 <div className="flex items-center gap-3">
-                                    <div className="w-1 h-8 bg-sky-500 rounded-full" />
+
                                     <h2 className="font-bold text-gray-800 text-sm flex items-center gap-2">
                                         {goalGroup.goalName}
                                     </h2>
@@ -533,7 +581,7 @@ export default function ProfilePage() {
                                         const isElementExpanded = expandedElements.includes(elKey);
 
                                         return (
-                                            <div key={elementGroup.title} className="border border-gray-50 rounded-lg overflow-hidden border-l-4 border-l-blue-400">
+                                            <div key={elementGroup.title} className="bg-white rounded-xl border border-gray-100 overflow-hidden border-l-4 border-l-sky-500 shadow-sm">
                                                 {/* 第2階層: 要素 (Element) */}
                                                 <div
                                                     onClick={() => toggleElement(goalGroup.goalName, elementGroup.title)}
@@ -566,12 +614,19 @@ export default function ProfilePage() {
                                                                     {isSubExpanded && (
                                                                         <div className="p-2 space-y-2 bg-gray-50/10">
                                                                             {subGroup.tasks.map((task) => (
-                                                                                <div key={task.id} className="relative flex items-start gap-2 p-3 rounded-lg border bg-gray-50 border-gray-100 opacity-80 mb-1 last:mb-0">
+                                                                                <div key={task.id} className="relative flex items-start gap-2 p-3 rounded-lg border bg-gray-50 border-gray-100 opacity-80 mb-1 last:mb-0 group">
+                                                                                    <button
+                                                                                        onClick={() => deleteCompletedTask(task.id)}
+                                                                                        className="absolute top-2 right-2 p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                                        title="削除"
+                                                                                    >
+                                                                                        <X className="w-3.5 h-3.5" />
+                                                                                    </button>
                                                                                     <div className="flex-shrink-0 mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center bg-sky-500 border-sky-500">
                                                                                         <Check className="w-2.5 h-2.5 text-white" />
                                                                                     </div>
-                                                                                    <div className="flex-1 min-w-0">
-                                                                                        <p className="text-[11px] font-bold leading-relaxed truncate pr-4 text-gray-400 line-through">
+                                                                                    <div className="flex-1 min-w-0 pr-6">
+                                                                                        <p className="text-[11px] font-bold leading-relaxed text-gray-400 line-through break-words">
                                                                                             {task.title}
                                                                                         </p>
                                                                                         <div className="flex items-center gap-1.5 mt-0.5">
@@ -761,14 +816,14 @@ export default function ProfilePage() {
                         </div>
 
                         <div className="flex gap-6 mt-4">
-                            <div className="text-center">
+                            <button onClick={() => openFollowModal('following')} className="text-center hover:bg-gray-50 px-3 py-1 rounded-lg transition-colors">
                                 <div className="font-bold text-lg text-gray-800">{followingCount}</div>
                                 <div className="text-xs text-gray-500">フォロー中</div>
-                            </div>
-                            <div className="text-center">
+                            </button>
+                            <button onClick={() => openFollowModal('followers')} className="text-center hover:bg-gray-50 px-3 py-1 rounded-lg transition-colors">
                                 <div className="font-bold text-lg text-gray-800">{followerCount}</div>
                                 <div className="text-xs text-gray-500">フォロワー</div>
-                            </div>
+                            </button>
                         </div>
 
                         {isEditing ? (
@@ -919,6 +974,54 @@ export default function ProfilePage() {
                                     <Send className="w-4 h-4" />
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* === フォロー・フォロワーモーダル === */}
+            {isFollowModalOpen && (
+                <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden max-h-[80vh] flex flex-col">
+                        <div className="flex items-center justify-between p-4 border-b border-gray-100">
+                            <h3 className="font-bold text-gray-800">
+                                {followModalType === 'following' ? 'フォロー中' : 'フォロワー'}
+                            </h3>
+                            <button onClick={() => setIsFollowModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-full">
+                                <X className="w-5 h-5 text-gray-500" />
+                            </button>
+                        </div>
+                        <div className="overflow-y-auto flex-1">
+                            {followList.length > 0 ? (
+                                <div className="divide-y divide-gray-100">
+                                    {followList.map((profile) => (
+                                        <Link
+                                            key={profile.id}
+                                            href={`/user/${profile.id}`}
+                                            onClick={() => setIsFollowModalOpen(false)}
+                                            className="flex items-center gap-3 p-4 hover:bg-gray-50 transition-colors"
+                                        >
+                                            <img
+                                                src={profile.avatar_url}
+                                                alt={profile.name}
+                                                className="w-12 h-12 rounded-full border border-gray-100 object-cover"
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-bold text-gray-900 truncate">{profile.name}</p>
+                                                {profile.goal && (
+                                                    <p className="text-xs text-gray-500 truncate">{profile.goal}</p>
+                                                )}
+                                            </div>
+                                        </Link>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+                                    <p className="text-sm">
+                                        {followModalType === 'following' ? 'フォロー中のユーザーはいません' : 'フォロワーはいません'}
+                                    </p>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

@@ -86,14 +86,11 @@ export default function PlanPage() {
     }
   }, [goal, targetDate, currentLevel, weekdayTime, weekendTime]);
 
-  // --- 履歴の取得 & クリーンアップ ---
+  // --- 履歴の取得 ---
   const fetchAndCleanupLogs = async () => {
     if (!user) return;
     try {
       const supabase = await createClerkSupabaseClient(getToken);
-      const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-
-      await supabase.from('ai_logs').delete().eq('user_id', user.id).lt('created_at', thirtyMinsAgo);
 
       const { data } = await supabase
         .from('ai_logs')
@@ -164,6 +161,30 @@ export default function PlanPage() {
     if (!roadmap) return;
     const newRoadmap = [...roadmap];
     (newRoadmap[elementIndex].subElements[subElementIndex].tasks[taskIndex] as any)[field] = value;
+    setRoadmap(newRoadmap);
+  };
+
+  const handleDeleteTask = (elementIndex: number, subElementIndex: number, taskIndex: number) => {
+    if (!roadmap) return;
+    if (!confirm('このタスクを削除しますか?')) return;
+    const newRoadmap = [...roadmap];
+    newRoadmap[elementIndex].subElements[subElementIndex].tasks.splice(taskIndex, 1);
+    setRoadmap(newRoadmap);
+  };
+
+  const handleDeleteSubElement = (elementIndex: number, subElementIndex: number) => {
+    if (!roadmap) return;
+    if (!confirm('この中項目とその配下のタスクをすべて削除しますか?')) return;
+    const newRoadmap = [...roadmap];
+    newRoadmap[elementIndex].subElements.splice(subElementIndex, 1);
+    setRoadmap(newRoadmap);
+  };
+
+  const handleDeleteElement = (elementIndex: number) => {
+    if (!roadmap) return;
+    if (!confirm('この大項目とその配下のすべてを削除しますか?')) return;
+    const newRoadmap = [...roadmap];
+    newRoadmap.splice(elementIndex, 1);
     setRoadmap(newRoadmap);
   };
 
@@ -337,7 +358,7 @@ export default function PlanPage() {
 
           {logs.length > 0 && (
             <div className="pt-8 border-t border-gray-100">
-              <h3 className="text-sm font-bold text-gray-500 mb-4 flex items-center gap-2"><History className="w-4 h-4" /> 最近の履歴 (30分以内)</h3>
+              <h3 className="text-sm font-bold text-gray-500 mb-4 flex items-center gap-2"><History className="w-4 h-4" /> 過去の生成履歴</h3>
               <div className="space-y-2">
                 {logs.map((log) => (
                   <div key={log.id} onClick={() => setSelectedLog(log)} className="flex items-center justify-between p-4 bg-white border border-gray-100 rounded-xl shadow-sm hover:border-sky-200 cursor-pointer transition-all">
@@ -366,35 +387,72 @@ export default function PlanPage() {
                   <p className="text-lg font-bold text-gray-900 leading-tight">{selectedLog.goal_input}</p>
                 </div>
                 <div className="space-y-4">
-                  <p className="text-xs font-bold text-gray-400 border-b pb-1">AIが提案するロードマップ</p>
-                  {selectedLog.ai_response.roadmap.map((element, eIdx) => (
-                    <div key={eIdx} className="space-y-4">
-                      <div className="flex items-center gap-2 border-l-4 border-blue-500 pl-3 py-1">
-                        <p className="text-sm font-bold text-gray-800">{element.elementTitle}</p>
-                      </div>
-                      <div className="pl-4 space-y-4">
-                        {element.subElements?.map((sub, seIdx) => (
-                          <div key={seIdx} className="space-y-3">
-                            <div className="flex items-center gap-2 border-l-4 border-orange-400 pl-3 py-1">
-                              <p className="text-xs font-bold text-gray-700">{sub.subElementTitle}</p>
-                            </div>
-                            <div className="pl-4 space-y-3">
-                              {sub.tasks.map((task, tIdx) => (
-                                <div key={tIdx} className="space-y-1 border-l-4 border-green-400 pl-3 py-1">
-                                  <div className="flex items-center justify-between">
-                                    <p className="text-[11px] font-bold text-gray-700">{task.title}</p>
-                                    <span className={`text-[9px] font-bold ${formatDeadlineLabel(task.deadline).color}`}>
-                                      {formatDeadlineLabel(task.deadline).label}
-                                    </span>
-                                  </div>
-                                </div>
-                              ))}
+                  <p className="text-xs font-bold text-gray-400 border-b pb-1 px-1">AIが提案するロードマップ</p>
+                  <div className="space-y-4">
+                    <p className="text-xs font-bold text-gray-400 border-b pb-1 px-1">AIが提案するロードマップ</p>
+                    {selectedLog.ai_response.roadmap.map((element, eIdx) => {
+                      const elKey = `history-${eIdx}`;
+                      const isElementExpanded = expandedElements.includes(elKey);
+
+                      return (
+                        <div key={eIdx} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden text-sm border-l-4 border-l-sky-500">
+                          {/* 第1階層: 要素 (Element) */}
+                          <div
+                            onClick={() => toggleElement("history", eIdx.toString())}
+                            className="p-4 bg-gray-50/30 flex items-center justify-between cursor-pointer hover:bg-gray-100/50 transition-colors"
+                          >
+                            <h4 className="font-bold text-gray-800 flex items-center gap-2">
+                              <span className="text-sky-500 text-xs">●</span>
+                              {element.elementTitle}
+                            </h4>
+                            <div className="text-gray-400">
+                              {isElementExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+
+                          {isElementExpanded && (
+                            <div className="px-3 pb-4 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                              {element.subElements?.map((sub, seIdx) => {
+                                const subKey = `history-${eIdx}-${seIdx}`;
+                                const isSubExpanded = expandedSubElements.includes(subKey);
+
+                                return (
+                                  <div key={seIdx} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden border-l-4 border-l-orange-400">
+                                    {/* 第2階層: サブ要素 (SubElement) */}
+                                    <div
+                                      onClick={() => toggleSubElement(subKey)}
+                                      className="p-3 bg-gray-50/20 flex items-center justify-between cursor-pointer hover:bg-gray-100/50 transition-colors"
+                                    >
+                                      <h5 className="font-bold text-gray-700 text-xs">{sub.subElementTitle}</h5>
+                                      <div className="text-gray-400">
+                                        {isSubExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                      </div>
+                                    </div>
+
+                                    {isSubExpanded && (
+                                      <div className="px-2 pb-3 pt-1 space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                                        {sub.tasks.map((task, tIdx) => (
+                                          <div key={tIdx} className="p-3 rounded-xl border border-gray-50 bg-gray-50/30 border-l-4 border-l-emerald-400 flex flex-col gap-1.5">
+                                            {/* 第3階層: タスク (Task) */}
+                                            <div className="flex items-center justify-between">
+                                              <p className="text-[11px] font-bold text-gray-700 leading-relaxed">{task.title}</p>
+                                              <span className={`text-[9px] font-bold flex-shrink-0 ml-2 ${formatDeadlineLabel(task.deadline).color}`}>
+                                                {formatDeadlineLabel(task.deadline).label}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
               <button onClick={() => { setRoadmap(selectedLog.ai_response.roadmap); setGoal(selectedLog.goal_input); setSelectedLog(null); }} className="mt-6 w-full py-3 bg-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-100">この計画を編集・保存する</button>
@@ -415,7 +473,7 @@ export default function PlanPage() {
       </header>
 
       <div className="max-w-md mx-auto p-4 space-y-4 animate-in slide-in-from-bottom-4">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 border-l-8 border-l-blue-500 text-center space-y-2">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center space-y-2">
           <h2 className="text-xl font-black text-sky-600">
             目標: {goal}
           </h2>
@@ -426,48 +484,75 @@ export default function PlanPage() {
 
         <div className="space-y-4">
           {roadmap.map((element, eIdx) => (
-            <div key={eIdx} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden text-sm border-l-4 border-l-blue-500">
-              <button
-                onClick={() => toggleElement(eIdx)}
-                className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <h3 className="font-bold text-gray-800 text-left truncate">{element.elementTitle}</h3>
+            <div key={eIdx} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden text-sm border-l-4 border-l-sky-500">
+              <div className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                <button
+                  onClick={() => toggleElement(eIdx)}
+                  className="flex-1 flex items-center gap-3 text-left"
+                >
+                  <h3 className="font-bold text-gray-800 truncate">{element.elementTitle}</h3>
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleDeleteElement(eIdx)}
+                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                    title="削除"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border ${expandedElements.includes(eIdx) ? 'border-sky-500 bg-sky-50' : 'border-gray-200'}`}>
+                    {expandedElements.includes(eIdx) ? (
+                      <span className="text-sky-500 font-bold text-lg leading-none mt-[-2px]">-</span>
+                    ) : (
+                      <span className="text-gray-400 font-bold text-lg leading-none mt-[-1px]">+</span>
+                    )}
+                  </div>
                 </div>
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center border ${expandedElements.includes(eIdx) ? 'border-sky-500 bg-sky-50' : 'border-gray-200'}`}>
-                  {expandedElements.includes(eIdx) ? (
-                    <span className="text-sky-500 font-bold text-lg leading-none mt-[-2px]">-</span>
-                  ) : (
-                    <span className="text-gray-400 font-bold text-lg leading-none mt-[-1px]">+</span>
-                  )}
-                </div>
-              </button>
+              </div>
 
               {expandedElements.includes(eIdx) && (
                 <div className="px-4 pb-4 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
                   <div className="h-px bg-gray-50 mb-1" />
                   {element.subElements?.map((sub, seIdx) => (
                     <div key={seIdx} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden border-l-4 border-l-orange-400">
-                      <button
-                        onClick={() => toggleSubElement(eIdx, seIdx)}
-                        className="w-full p-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
-                      >
-                        <h4 className="font-bold text-gray-700 text-xs text-left truncate">{sub.subElementTitle}</h4>
-                        <div className={`w-5 h-5 rounded-full flex items-center justify-center border ${expandedSubElements.includes(`${eIdx}-${seIdx}`) ? 'border-orange-500 bg-orange-50' : 'border-gray-200'}`}>
-                          {expandedSubElements.includes(`${eIdx}-${seIdx}`) ? (
-                            <span className="text-orange-500 font-bold text-md leading-none mt-[-2px]">-</span>
-                          ) : (
-                            <span className="text-gray-400 font-bold text-md leading-none mt-[-1px]">+</span>
-                          )}
+                      <div className="w-full p-3 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                        <button
+                          onClick={() => toggleSubElement(eIdx, seIdx)}
+                          className="flex-1 flex items-center gap-2 text-left"
+                        >
+                          <h4 className="font-bold text-gray-700 text-xs truncate">{sub.subElementTitle}</h4>
+                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleDeleteSubElement(eIdx, seIdx)}
+                            className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                            title="削除"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center border ${expandedSubElements.includes(`${eIdx}-${seIdx}`) ? 'border-orange-500 bg-orange-50' : 'border-gray-200'}`}>
+                            {expandedSubElements.includes(`${eIdx}-${seIdx}`) ? (
+                              <span className="text-orange-500 font-bold text-md leading-none mt-[-2px]">-</span>
+                            ) : (
+                              <span className="text-gray-400 font-bold text-md leading-none mt-[-1px]">+</span>
+                            )}
+                          </div>
                         </div>
-                      </button>
+                      </div>
 
                       {expandedSubElements.includes(`${eIdx}-${seIdx}`) && (
                         <div className="px-3 pb-3 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
                           <div className="h-px bg-gray-50 mb-1" />
                           {sub.tasks.map((task, tIdx) => (
-                            <div key={tIdx} className={`p-3 rounded-xl border border-gray-50 bg-gray-50/30 border-l-4 border-l-green-400`}>
-                              <div className="flex items-center gap-2 mb-1">
+                            <div key={tIdx} className="p-3 rounded-xl border border-gray-50 bg-gray-50/30 border-l-4 border-l-emerald-400 relative group">
+                              <button
+                                onClick={() => handleDeleteTask(eIdx, seIdx, tIdx)}
+                                className="absolute top-2 right-2 p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="削除"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                              <div className="flex items-center gap-2 mb-1 pr-6">
                                 <input
                                   type="text"
                                   value={task.title}

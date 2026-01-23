@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Check, Plus, Calendar, Trophy, AlertCircle, X, Target, Clock, ArrowLeft, Pencil, ChevronRight, ChevronDown } from 'lucide-react';
+import { Check, Plus, Calendar, Trophy, AlertCircle, X, Target, Clock, ArrowLeft, Pencil, ChevronRight, ChevronDown, MoreHorizontal, Trash2 } from 'lucide-react';
 import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 import { useUser, useAuth } from '@clerk/nextjs';
 import { formatDeadlineLabel } from '@/lib/dateUtils';
@@ -58,6 +58,14 @@ export default function TasksPage() {
     const [goalGroups, setGoalGroups] = useState<GoalGroup[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
+    // 目標編集用
+    const [isEditingGoal, setIsEditingGoal] = useState(false);
+    const [editingGoalName, setEditingGoalName] = useState("");
+    const [newGoalName, setNewGoalName] = useState("");
+
+    // タスクメニュー用
+    const [activeTaskMenuId, setActiveTaskMenuId] = useState<string | null>(null);
+
     // --- 初期データ読み込み ---
     useEffect(() => {
         if (user) {
@@ -75,7 +83,7 @@ export default function TasksPage() {
             .from('tasks')
             .select('*')
             .eq('user_id', user.id)
-            .order('created_at', { ascending: false });
+            .order('deadline', { ascending: true, nullsFirst: false }); // 期限が近い順（未設定は最後）
 
         if (error) {
             console.error('Error fetching tasks:', error);
@@ -359,6 +367,56 @@ export default function TasksPage() {
         setIsAddModalOpen(false);
     };
 
+    const handleEditGoal = (goalName: string) => {
+        setEditingGoalName(goalName);
+        setNewGoalName(goalName);
+        setIsEditingGoal(true);
+    };
+
+    const handleSaveGoalEdit = async () => {
+        if (!user || !newGoalName.trim() || newGoalName === editingGoalName) {
+            setIsEditingGoal(false);
+            return;
+        }
+
+        const supabase = await createClerkSupabaseClient(getToken);
+
+        // すべてのタスクのgoal_titleを更新
+        const tasksToUpdate = goalGroups
+            .find(g => g.goalName === editingGoalName)
+            ?.elements.flatMap(e => e.subElements.flatMap(se => se.tasks)) || [];
+
+        for (const task of tasksToUpdate) {
+            const oldGoalTitle = task.goal_title;
+            const newGoalTitle = oldGoalTitle.replace(editingGoalName, newGoalName);
+
+            await supabase
+                .from('tasks')
+                .update({ goal_title: newGoalTitle })
+                .eq('id', task.id);
+        }
+
+        await fetchTasks();
+        setIsEditingGoal(false);
+    };
+
+    const handleDeleteGoal = async (goalName: string) => {
+        if (!confirm(`目標「${goalName}」とその配下のすべてのタスクを削除しますか?`)) return;
+
+        const supabase = await createClerkSupabaseClient(getToken);
+
+        // この目標に紐づくすべてのタスクを削除
+        const tasksToDelete = goalGroups
+            .find(g => g.goalName === goalName)
+            ?.elements.flatMap(e => e.subElements.flatMap(se => se.tasks)) || [];
+
+        for (const task of tasksToDelete) {
+            await supabase.from('tasks').delete().eq('id', task.id);
+        }
+
+        await fetchTasks();
+    };
+
     // --- 表示状態の判定 ---
     const hasTodoTasks = goalGroups.some(g => g.elements.some(e => e.subElements.some(se => se.tasks.some(t => !t.isCompleted))));
     const hasDoneTasks = goalGroups.some(g => g.elements.some(e => e.subElements.some(se => se.tasks.some(t => t.isCompleted))));
@@ -422,7 +480,7 @@ export default function TasksPage() {
                                 className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors select-none bg-sky-50/30"
                             >
                                 <div className="flex items-center gap-3">
-                                    <div className="w-1 h-8 bg-sky-500 rounded-full" />
+
                                     <h2 className="font-bold text-gray-800 text-base flex items-center gap-2">
                                         {goalGroup.goalName}
                                     </h2>
@@ -430,8 +488,24 @@ export default function TasksPage() {
                                         {goalVisibleTasks.length}
                                     </span>
                                 </div>
-                                <div className="text-gray-400">
-                                    {isGoalExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); handleEditGoal(goalGroup.goalName); }}
+                                        className="p-1.5 text-gray-400 hover:text-sky-500 hover:bg-sky-50 rounded transition-colors"
+                                        title="編集"
+                                    >
+                                        <Pencil className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); handleDeleteGoal(goalGroup.goalName); }}
+                                        className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                                        title="削除"
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                    <div className="text-gray-400">
+                                        {isGoalExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+                                    </div>
                                 </div>
                             </div>
 
@@ -448,7 +522,7 @@ export default function TasksPage() {
                                         if (elementVisibleTasks.length === 0) return null;
 
                                         return (
-                                            <div key={elementGroup.title} className="border border-gray-50 rounded-lg overflow-hidden border-l-4 border-l-blue-400">
+                                            <div key={elementGroup.title} className="bg-white rounded-xl border border-gray-100 overflow-hidden border-l-4 border-l-sky-500 shadow-sm">
                                                 {/* 第2階層: 要素 (Element) */}
                                                 <div
                                                     onClick={() => toggleElement(goalGroup.goalName, elementGroup.title)}
@@ -498,29 +572,29 @@ export default function TasksPage() {
                                                                             {visibleTasks.map((task) => (
                                                                                 <div
                                                                                     key={task.id}
-                                                                                    className={`relative flex items-start gap-2 p-3 rounded-lg border transition-all group ${task.isCompleted
+                                                                                    className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${task.isCompleted
                                                                                         ? "bg-gray-50 border-gray-100 opacity-80"
-                                                                                        : "bg-white border-gray-100 shadow-sm border-l-4 border-l-green-400"
+                                                                                        : "bg-white border-gray-100 shadow-sm border-l-4 border-l-emerald-400"
                                                                                         }`}
                                                                                 >
-                                                                                    <button
-                                                                                        onClick={(e) => {
-                                                                                            e.stopPropagation();
-                                                                                            toggleTaskCompletion(subGroup.fullTitle, task.id);
-                                                                                        }}
-                                                                                        className={`flex-shrink-0 mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${task.isCompleted ? "bg-sky-500 border-sky-500" : "bg-white border-gray-300"
-                                                                                            }`}
-                                                                                    >
-                                                                                        {task.isCompleted && <Check className="w-3 h-3 text-white" />}
-                                                                                    </button>
+                                                                                    {/* 左側: チェックボタン (上揃え) */}
+                                                                                    <div className="flex-shrink-0 pt-0.5">
+                                                                                        <button
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                toggleTaskCompletion(subGroup.fullTitle, task.id);
+                                                                                            }}
+                                                                                            className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${task.isCompleted ? "bg-sky-500 border-sky-500" : "bg-white border-gray-300 hover:border-sky-400"
+                                                                                                }`}
+                                                                                        >
+                                                                                            {task.isCompleted && <Check className="w-3.5 h-3.5 text-white" />}
+                                                                                        </button>
+                                                                                    </div>
 
+                                                                                    {/* 右側: コンテンツエリア (縦並び) */}
                                                                                     <div className="flex-1 min-w-0">
-                                                                                        <p className={`text-xs font-bold leading-relaxed truncate pr-16 ${task.isCompleted ? "text-gray-400 line-through" : "text-gray-800"
-                                                                                            }`}>
-                                                                                            {task.title}
-                                                                                        </p>
-
-                                                                                        <div className="flex items-center gap-3 mt-1.5">
+                                                                                        {/* 上段: 期限とメニュー */}
+                                                                                        <div className="flex items-center justify-between gap-2 mb-1">
                                                                                             <div className={`flex items-center gap-1 text-[10px] ${task.isCompleted ? "text-gray-300" : "text-sky-500 font-bold"
                                                                                                 }`}>
                                                                                                 <Calendar className="w-3 h-3" />
@@ -533,30 +607,57 @@ export default function TasksPage() {
                                                                                                     <span>{task.deadline}</span>
                                                                                                 )}
                                                                                             </div>
-                                                                                        </div>
-                                                                                    </div>
 
-                                                                                    <div className="absolute right-2 top-2 flex gap-1 group-hover:opacity-100 opacity-0 transition-opacity translate-y-[-2px]">
-                                                                                        {!task.isCompleted && (
-                                                                                            <button
-                                                                                                onClick={(e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    openEditModal(subGroup.fullTitle, task);
-                                                                                                }}
-                                                                                                className="p-1 text-gray-400 hover:text-sky-500 hover:bg-sky-50 rounded"
-                                                                                            >
-                                                                                                <Pencil className="w-3 h-3" />
-                                                                                            </button>
-                                                                                        )}
-                                                                                        <button
-                                                                                            onClick={(e) => {
-                                                                                                e.stopPropagation();
-                                                                                                deleteTask(subGroup.fullTitle, task.id);
-                                                                                            }}
-                                                                                            className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"
-                                                                                        >
-                                                                                            <X className="w-3 h-3" />
-                                                                                        </button>
+                                                                                            <div className="relative">
+                                                                                                <button
+                                                                                                    onClick={(e) => {
+                                                                                                        e.stopPropagation();
+                                                                                                        setActiveTaskMenuId(activeTaskMenuId === task.id ? null : task.id);
+                                                                                                    }}
+                                                                                                    className="p-1 -mr-1 text-gray-400 hover:text-sky-500 hover:bg-sky-50 rounded-full transition-colors"
+                                                                                                >
+                                                                                                    <MoreHorizontal className="w-4 h-4" />
+                                                                                                </button>
+
+                                                                                                {activeTaskMenuId === task.id && (
+                                                                                                    <>
+                                                                                                        <div className="fixed inset-0 z-[60]" onClick={() => setActiveTaskMenuId(null)} />
+                                                                                                        <div className="absolute right-0 top-full mt-1 bg-white shadow-xl border border-gray-100 rounded-xl z-[70] w-28 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+                                                                                                            {!task.isCompleted && (
+                                                                                                                <button
+                                                                                                                    onClick={(e) => {
+                                                                                                                        e.stopPropagation();
+                                                                                                                        setActiveTaskMenuId(null);
+                                                                                                                        openEditModal(subGroup.fullTitle, task);
+                                                                                                                    }}
+                                                                                                                    className="flex items-center gap-2 w-full text-left px-4 py-2 text-[10px] font-bold text-gray-600 hover:bg-sky-50 hover:text-sky-600 border-b border-gray-50"
+                                                                                                                >
+                                                                                                                    <Pencil className="w-3 h-3" />
+                                                                                                                    編集
+                                                                                                                </button>
+                                                                                                            )}
+                                                                                                            <button
+                                                                                                                onClick={(e) => {
+                                                                                                                    e.stopPropagation();
+                                                                                                                    setActiveTaskMenuId(null);
+                                                                                                                    deleteTask(subGroup.fullTitle, task.id);
+                                                                                                                }}
+                                                                                                                className="flex items-center gap-2 w-full text-left px-4 py-2 text-[10px] font-bold text-red-500 hover:bg-red-50"
+                                                                                                            >
+                                                                                                                <Trash2 className="w-3 h-3" />
+                                                                                                                削除
+                                                                                                            </button>
+                                                                                                        </div>
+                                                                                                    </>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        </div>
+
+                                                                                        {/* 下段: タイトル */}
+                                                                                        <p className={`text-sm font-bold leading-relaxed break-words ${task.isCompleted ? "text-gray-400 line-through" : "text-gray-800"
+                                                                                            }`}>
+                                                                                            {task.title}
+                                                                                        </p>
                                                                                     </div>
                                                                                 </div>
                                                                             ))}
@@ -709,6 +810,37 @@ export default function TasksPage() {
                                         <span>リストに追加する</span>
                                     </>
                                 )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* === 目標編集モーダル === */}
+            {isEditingGoal && (
+                <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4">
+                    <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-6">
+                        <h3 className="text-lg font-bold text-gray-800 mb-4">目標を編集</h3>
+                        <input
+                            type="text"
+                            value={newGoalName}
+                            onChange={(e) => setNewGoalName(e.target.value)}
+                            className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl outline-none text-base focus:border-sky-500 focus:ring-4 focus:ring-sky-100 transition-all mb-4"
+                            placeholder="新しい目標名"
+                            autoFocus
+                        />
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setIsEditingGoal(false)}
+                                className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition-colors"
+                            >
+                                キャンセル
+                            </button>
+                            <button
+                                onClick={handleSaveGoalEdit}
+                                className="flex-1 py-3 bg-sky-500 text-white rounded-xl font-bold hover:bg-sky-600 transition-colors"
+                            >
+                                保存
                             </button>
                         </div>
                     </div>
