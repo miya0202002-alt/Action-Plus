@@ -511,7 +511,7 @@ export default function PlanPage() {
                 </div>
               </div>
 
-              {expandedElements.includes(eIdx) && (
+              {expandedElements.includes(eIdx.toString()) && (
                 <div className="px-4 pb-4 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
                   <div className="h-px bg-gray-50 mb-1" />
                   {element.subElements?.map((sub, seIdx) => (
